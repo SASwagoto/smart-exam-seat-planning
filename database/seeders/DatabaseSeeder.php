@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
@@ -15,11 +16,21 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $this->command->call('shield:generate', ['--all' => true, '--no-interaction' => true]);
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        // ২. ইউজার তৈরি করুন
+        $user = \App\Models\User::updateOrCreate(
+            ['email' => 'admin@smartexa.com'],
+            [
+                'name' => 'Shawon Ahmed',
+                'password' => bcrypt('password'),
+            ]
+        );
+
+        // ৩. সুপার অ্যাডমিন রোল এসাইন করুন
+        // shield:generate কমান্ডটি অটোমেটিক 'super_admin' রোল তৈরি করে রাখে
+        $user->assignRole('super_admin');
+
+        $this->command->info('Admin user created successfully!');
     }
 }
