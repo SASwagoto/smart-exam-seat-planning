@@ -20,7 +20,7 @@ class DatabaseSeeder extends Seeder
 
         // ২. ইউজার তৈরি করুন
         $user = \App\Models\User::updateOrCreate(
-            ['email' => 'admin@smartexa.com'],
+            ['email' => 'admin@gmail.com'],
             [
                 'name' => 'Shawon Ahmed',
                 'password' => bcrypt('password'),
