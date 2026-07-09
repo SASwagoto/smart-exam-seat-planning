@@ -19,4 +19,9 @@ class Batch extends Model
     {
         return $this->hasMany(Section::class);
     }
+
+    public function teacherCourseAssignments()
+    {
+        return $this->hasMany(TeacherCourseAssignment::class);
+    }
 }

@@ -15,8 +15,8 @@ return new class extends Migration
             $table->string('file_path');
             $table->string('importer');
             $table->integer('total_rows');
+            $table->integer('processed_rows')->default(0);
             $table->integer('successful_rows')->default(0);
-            $table->integer('failed_rows_count')->default(0);
             $table->timestamps();
         });
 
@@ -24,7 +24,7 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('import_id');
             $table->longText('data');
-            $table->longText('validation_errors')->nullable();
+            $table->longText('validation_error')->nullable();
             $table->timestamps();
         });
     }

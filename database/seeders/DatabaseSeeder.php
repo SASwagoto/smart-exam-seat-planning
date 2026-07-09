@@ -18,6 +18,10 @@ class DatabaseSeeder extends Seeder
     {
         $this->command->call('shield:generate', ['--all' => true, '--no-interaction' => true]);
 
+        $this->call([
+            SemesterSeeder::class,
+        ]);
+
         // ২. ইউজার তৈরি করুন
         $user = \App\Models\User::updateOrCreate(
             ['email' => 'admin@gmail.com'],

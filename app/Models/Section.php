@@ -13,4 +13,9 @@ class Section extends Model
     {
         return $this->belongsTo(Batch::class);
     }
+
+    public function teacherCourseAssignments()
+    {
+        return $this->hasMany(TeacherCourseAssignment::class);
+    }
 }
