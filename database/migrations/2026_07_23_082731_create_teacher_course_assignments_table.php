@@ -13,34 +13,13 @@ return new class extends Migration
     {
         Schema::create('teacher_course_assignments', function (Blueprint $table) {
             $table->id();
-
             $table->foreignId('academic_session_id')->constrained()->cascadeOnDelete();
-
             $table->foreignId('department_id')->constrained()->cascadeOnDelete();
-
-            $table->foreignId('batch_id')->constrained()->cascadeOnDelete();
-
-            $table->foreignId('section_id')->constrained()->cascadeOnDelete();
-
             $table->foreignId('teacher_id')->constrained()->cascadeOnDelete();
-
             $table->foreignId('course_id')->constrained()->cascadeOnDelete();
-
             $table->timestamps();
 
-            $table->index('department_id', 'idx_department');
-
-            $table->index('batch_id', 'idx_batch');
-
-            $table->unique(
-                [
-                    'academic_session_id',
-                    'course_id',
-                    'batch_id',
-                    'section_id',
-                ],
-                'tca_unique'
-            );
+            $table->unique(['academic_session_id', 'teacher_id', 'course_id'], 'teacher_course_unique');
         });
     }
 

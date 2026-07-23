@@ -13,24 +13,14 @@ return new class extends Migration
     {
         Schema::create('student_enrollment_courses', function (Blueprint $table) {
             $table->id();
-
-            $table->foreignId('student_enrollment_id')
-                ->constrained()
+            $table->foreignId('student_course_enrollment_id')
+                ->constrained('student_course_enrollments', 'id', 'stu_crs_enr_fk')
                 ->cascadeOnDelete();
-
-            $table->foreignId('course_id')
-                ->constrained()
-                ->cascadeOnDelete();
-
+                
+            $table->foreignId('course_id')->constrained()->cascadeOnDelete();
+            $table->string('enrollment_type')->default('Regular');
+            $table->string('status')->default('Enrolled');
             $table->timestamps();
-
-            $table->unique(
-                [
-                    'student_enrollment_id',
-                    'course_id',
-                ],
-                'student_course_unique'
-            );
         });
     }
 

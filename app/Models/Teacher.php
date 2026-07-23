@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Teacher extends Model
 {
@@ -15,8 +16,10 @@ class Teacher extends Model
         'status',
     ];
 
-    public function teacherCourseAssignments()
+    public function courses(): BelongsToMany
     {
-        return $this->hasMany(TeacherCourseAssignment::class);
+        return $this->belongsToMany(Course::class, 'teacher_course_assignments')
+            ->withPivot(['academic_session_id', 'department_id'])
+            ->withTimestamps();
     }
 }
