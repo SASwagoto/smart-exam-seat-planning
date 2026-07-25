@@ -18,9 +18,9 @@ class SectionCourseAssignmentsTable
                     ->searchable(),
                 TextColumn::make('department.name')
                     ->searchable(),
-                TextColumn::make('batch.id')
+                TextColumn::make('batch.batch_number')
                     ->searchable(),
-                TextColumn::make('section.id')
+                TextColumn::make('section.section_name')
                     ->searchable(),
                 TextColumn::make('created_at')
                     ->dateTime()
@@ -34,7 +34,8 @@ class SectionCourseAssignmentsTable
             ->filters([
                 //
             ])
-            ->recordActions([
+            ->recordUrl(null)
+            ->actions([
                 EditAction::make(),
             ])
             ->toolbarActions([
