@@ -20,23 +20,17 @@ class Room extends Model
     ];
 
     protected $casts = [
-        'is_active'      => 'boolean',
-        'total_rows'     => 'integer',
-        'total_cols'     => 'integer',
-        'total_seats'    => 'integer',
-        'disabled_seats' => 'array', 
+        'is_active' => 'boolean',
+        'total_rows' => 'integer',
+        'total_cols' => 'integer',
+        'total_seats' => 'integer',
+        'disabled_seats' => 'array',
     ];
-
 
     public function getEffectiveCapacityAttribute(): int
     {
-        if ($this->total_seats) {
-            return $this->total_seats;
-        }
-
-        $baseCapacity = $this->total_rows * $this->total_cols;
+        $baseCapacity = $this->total_seats ?? ($this->total_rows * $this->total_cols);
         $disabledCount = is_array($this->disabled_seats) ? count($this->disabled_seats) : 0;
-
         return max(0, $baseCapacity - $disabledCount);
     }
 }
