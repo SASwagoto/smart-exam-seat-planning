@@ -20,6 +20,20 @@ class SectionCourseAssignment extends Model
     public function batch(): BelongsTo { return $this->belongsTo(Batch::class); }
     public function section(): BelongsTo { return $this->belongsTo(Section::class); }
 
+    public function course(): BelongsTo
+    {
+        return $this->belongsTo(Course::class);
+    }
+
+    // ড্রপডাউনে সুন্দর করে দেখানোর জন্য accessor (ঐচ্ছিক কিন্তু সাজেস্টেড)
+    public function getFullLabelAttribute(): string
+    {
+        $sectionName = $this->section?->name ?? 'N/A';
+        $courseCode = $this->course?->code ?? $this->course?->name ?? 'N/A';
+
+        return "{$sectionName} — {$courseCode}";
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(SectionCourseAssignmentItem::class);
