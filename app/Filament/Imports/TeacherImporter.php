@@ -63,11 +63,11 @@ class TeacherImporter extends Importer
                 'teacher_id' => trim($this->data['teacher_id']),
             ],
             [
-                'name'        => trim($this->data['name']),
-                'email'       => trim($this->data['email']),
-                'phone'       => $this->data['phone'] ?: null,
+                'name' => trim($this->data['name']),
+                'email' => trim($this->data['email']),
+                'phone' => $this->data['phone'] ?: null,
                 'designation' => $this->data['designation'] ?: null,
-                'status'      => $this->data['status'] ?: 'Active',
+                'status' => $this->data['status'] ?: 'Active',
             ]
         );
     }
@@ -76,58 +76,71 @@ class TeacherImporter extends Importer
     {
         $teacher = $this->getRecord();
 
-        $sessionName     = isset($this->data['academic_session']) ? trim($this->data['academic_session']) : null;
-        $departmentInput = isset($this->data['department']) ? trim($this->data['department']) : null;
-        $courseCodesRaw  = isset($this->data['course_codes']) ? trim($this->data['course_codes']) : null;
+        $sessionName = trim($this->data['academic_session'] ?? '');
+        $departmentInput = trim($this->data['department'] ?? '');
+        $courseCodesRaw = trim($this->data['course_codes'] ?? '');
 
-        // যদি কোর্স বা সেশনের কোনো তথ্য না দেওয়া থাকে, তবে স্কিপ করবে
-        if (! $sessionName || ! $departmentInput || ! $courseCodesRaw) {
+        if ($sessionName === '' || $departmentInput === '' || $courseCodesRaw === '') {
             return;
         }
 
-        // ১. সেশনের নাম দিয়ে AcademicSession-এর ID বের করা
-        $session = AcademicSession::where('name', $sessionName)->first();
+        // Case-insensitive Academic Session
+        $session = AcademicSession::whereRaw('LOWER(name) = ?', [
+            strtolower($sessionName),
+        ])->first();
 
-        // ২. ডিপার্টমেন্টের কোড বা নাম দিয়ে Department-এর ID বের করা
-        $department = Department::where('code', $departmentInput)
-            ->orWhere('name', $departmentInput)
-            ->first();
+        // Case-insensitive Department (Code অথবা Name)
+        $department = Department::where(function ($query) use ($departmentInput) {
+            $query->whereRaw('LOWER(code) = ?', [strtolower($departmentInput)])
+                ->orWhereRaw('LOWER(name) = ?', [strtolower($departmentInput)]);
+        })->first();
 
-        // যদি সেশন এবং ডিপার্টমেন্ট ডাটাবেজে সঠিক পাওয়া যায়
-        if ($session && $department) {
-            // কমা দিয়ে স্প্লিট করে কোর্স কোডগুলো আলাদা করা
-            $courseCodes = array_map('trim', explode(',', $courseCodesRaw));
+        if (! $session || ! $department) {
+            return;
+        }
 
-            // কোর্স আইডিগুলো বের করে আনা
-            $courseIds = Course::whereIn('course_code', $courseCodes)
-                ->where('department_id', $department->id)
-                ->pluck('id');
+        // Course Codes পরিষ্কার করা
+        $courseCodes = collect(explode(',', $courseCodesRaw))
+            ->map(fn ($code) => strtoupper(trim($code)))
+            ->filter()
+            ->values()
+            ->all();
 
-            foreach ($courseIds as $courseId) {
-                TeacherCourseAssignment::firstOrCreate([
-                    'academic_session_id' => $session->id,
-                    'department_id'       => $department->id,
-                    'teacher_id'          => $teacher->id,
-                    'course_id'           => $courseId,
-                ]);
-            }
+        // Case-insensitive Course Code
+        $courseIds = Course::where('department_id', $department->id)
+            ->where(function ($query) use ($courseCodes) {
+                foreach ($courseCodes as $code) {
+                    $query->orWhereRaw('LOWER(course_code) = ?', [
+                        strtolower($code),
+                    ]);
+                }
+            })
+            ->pluck('id');
+
+        foreach ($courseIds as $courseId) {
+            TeacherCourseAssignment::firstOrCreate([
+                'academic_session_id' => $session->id,
+                'department_id' => $department->id,
+                'teacher_id' => $teacher->id,
+                'course_id' => $courseId,
+            ]);
         }
     }
 
     public static function getCompletedNotificationBody(Import $import): string
     {
         $body = 'Your teacher import has completed and '
-            . Number::format($import->successful_rows)
-            . ' '
-            . str('row')->plural($import->successful_rows)
-            . ' imported.';
+            .Number::format($import->successful_rows)
+            .' '
+            .str('row')->plural($import->successful_rows)
+            .' imported.';
 
         if ($failedRowsCount = $import->getFailedRowsCount()) {
             $body .= ' '
-                . Number::format($failedRowsCount)
-                . ' '
-                . str('row')->plural($failedRowsCount)
-                . ' failed to import.';
+                .Number::format($failedRowsCount)
+                .' '
+                .str('row')->plural($failedRowsCount)
+                .' failed to import.';
         }
 
         return $body;
