@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\SectionCourseAssignments\Schemas;
 
 use App\Models\Course;
+use App\Models\Section;
+use App\Models\SectionCourseAssignment;
 use App\Models\TeacherCourseAssignment;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -41,17 +43,57 @@ class SectionCourseAssignmentForm
                     ->live()
                     ->required(),
                 Select::make('section_id')
-                    ->relationship('section', 'section_name', function ($query, Get $get) {
+                    ->label('Section')
+                    ->options(function (Get $get, ?SectionCourseAssignment $record) {
                         $batchId = $get('batch_id');
+
                         if (! $batchId) {
-                            return $query->whereRaw('1 = 0');
+                            return [];
                         }
 
-                        return $query->where('batch_id', $batchId);
+                        $sections = Section::where('batch_id', $batchId)->get();
+
+                        return $sections->mapWithKeys(function ($section) use ($get, $record) {
+
+                            $query = SectionCourseAssignment::query()
+                                ->where('academic_session_id', $get('academic_session_id'))
+                                ->where('department_id', $get('department_id'))
+                                ->where('batch_id', $get('batch_id'))
+                                ->where('section_id', $section->id);
+
+                            if ($record) {
+                                $query->whereKeyNot($record->id);
+                            }
+
+                            $label = $section->section_name;
+
+                            if ($query->exists()) {
+                                $label .= ' 🔒 (Already Assigned)';
+                            }
+
+                            return [
+                                $section->id => $label,
+                            ];
+                        })->toArray();
                     })
-                    ->disabled(fn (Get $get) => ! $get('batch_id'))
+                    ->disableOptionWhen(function ($value, Get $get, ?SectionCourseAssignment $record) {
+
+                        $query = SectionCourseAssignment::query()
+                            ->where('academic_session_id', $get('academic_session_id'))
+                            ->where('department_id', $get('department_id'))
+                            ->where('batch_id', $get('batch_id'))
+                            ->where('section_id', $value);
+
+                        // Edit page হলে নিজের record বাদ দিবে
+                        if ($record) {
+                            $query->whereKeyNot($record->id);
+                        }
+
+                        return $query->exists();
+                    })
                     ->searchable()
                     ->preload()
+                    ->live()
                     ->required(),
                 Repeater::make('items')
                     ->relationship('items')

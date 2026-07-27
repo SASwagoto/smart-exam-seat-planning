@@ -20,6 +20,11 @@ class SectionCourseAssignmentItem extends Model
         return $this->belongsTo(Course::class);
     }
 
+    public function sectionCourseAssignment()
+    {
+        return $this->belongsTo(SectionCourseAssignment::class, 'section_course_assignment_id');
+    }
+    
     public function teacher(): BelongsTo
     {
         return $this->belongsTo(Teacher::class);

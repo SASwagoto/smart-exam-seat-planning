@@ -10,14 +10,17 @@ use App\Models\SectionCourseAssignment;
 use App\Models\SectionCourseAssignmentItem;
 use App\Models\StudentCourseEnrollment;
 use Carbon\CarbonPeriod;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section as FormSection;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\HtmlString;
 
 class ExamScheduleForm
 {
@@ -28,11 +31,11 @@ class ExamScheduleForm
             ->components([
 
                 // 👈 বাম পাশে: মূল ইনপুট ফর্ম (7 Columns)
-                FormSection::make('Exam Routine Setup')
+                FormSection::make('⚙️ Exam Routine Setup')
                     ->columnSpan(['default' => 12, 'lg' => 7])
                     ->schema([
 
-                        // ১. সিলেক্ট ডিপার্টমেন্ট ও সিলেক্ট এক্সাম (একই লাইনে)
+                        // ১. ডিপার্টমেন্ট ও এক্সাম সিলেক্ট
                         Grid::make(2)->schema([
                             Select::make('department_id')
                                 ->label('1. Select Department')
@@ -57,7 +60,7 @@ class ExamScheduleForm
                                     return Exam::where('department_id', $deptId)->pluck('name', 'id');
                                 })
                                 ->disabled(fn (Get $get) => ! $get('department_id'))
-                                ->placeholder(fn (Get $get) => $get('department_id') ? 'Select an Exam' : '⚠️ First Select Department')
+                                ->placeholder(fn (Get $get) => $get('department_id') ? 'Select an Exam' : '⚠️ Select Department First')
                                 ->searchable()
                                 ->preload()
                                 ->required()
@@ -65,7 +68,7 @@ class ExamScheduleForm
                                 ->afterStateUpdated(fn ($set) => $set('holidays', [])),
                         ]),
 
-                        // ২. ছুটির দিন নির্বাচন (এক্সামের ডেট রেঞ্জ থেকে)
+                        // ২. ছুটির দিন নির্বাচন
                         Select::make('holidays')
                             ->label('3. Select Holidays / Off-Days')
                             ->multiple()
@@ -100,171 +103,379 @@ class ExamScheduleForm
                             ->required()
                             ->live(),
 
-                        // ৪. রুম সিলেক্ট
+                        // ৪. কোর্স ফিল্টারিং ও রুলস (Grid)
+                        Grid::make(2)->schema([
+                            Select::make('max_courses_per_slot')
+                                ->label('5. Max Courses Per Slot')
+                                ->options(function (Get $get) {
+                                    $examId = $get('exam_id');
+
+                                    if (! $examId) {
+                                        return [
+                                            '1' => '1 Course / Slot',
+                                            '2' => '2 Courses / Slot',
+                                        ];
+                                    }
+
+                                    $exam = Exam::find($examId);
+                                    if (! $exam) {
+                                        return [];
+                                    }
+
+                                    $totalBatches = SectionCourseAssignment::where('academic_session_id', $exam->academic_session_id)
+                                        ->where('department_id', $exam->department_id)
+                                        ->pluck('batch_id')
+                                        ->unique()
+                                        ->filter()
+                                        ->count();
+
+                                    $maxLimit = max(2, $totalBatches);
+                                    $options = [];
+                                    for ($i = 1; $i <= $maxLimit; $i++) {
+                                        $options[(string) $i] = "{$i} ".($i === 1 ? 'Course' : 'Courses').' / Slot'.($i === $totalBatches ? ' (Max Batches)' : '');
+                                    }
+
+                                    return $options;
+                                })
+                                ->default('auto')
+                                ->required()
+                                ->live(),
+
+                            Checkbox::make('exclude_lab_courses')
+                                ->label('Exclude Lab Courses')
+                                ->default(true)
+                                ->live()
+                                ->helperText('টিক দেওয়া থাকলে কেবল থিওরি কোর্স কাউন্ট হবে।'),
+                        ]),
+
+                        // ৫. ব্যাক-টু-ব্যাক স্লট রেস্ট্রিকশন ফিল্ড
+                        Grid::make(1)->schema([
+                            Toggle::make('prevent_back_to_back')
+                                ->label('🚫 Prevent Back-to-Back Slot Exams for Same Batch/Student')
+                                ->default(true)
+                                ->live()
+                                ->helperText('চালু থাকলে একই ব্যাচের পরীক্ষা পরপর দুটি স্লটে (যেমন Slot 1 ও Slot 2) দেওয়া যাবে না। মাঝখানে অন্তত ১টি স্লট বা দিনের গ্যাপ থাকবে।'),
+                        ]),
+
+                        Grid::make(2)->schema([
+                            Select::make('seating_algorithm')
+                                ->label('Seating Arrangement Algorithm')
+                                ->options([
+                                    'zig_zag' => '⚡ Zig-Zag Pattern (Mixes Batch Students)',
+                                    'column_skip' => 'Column Skip (A|B|A)',
+                                ])
+                                ->default('zig_zag')
+                                ->required(),
+                            Select::make('routine_algorithm')
+                            ->label('Routine Generator Strategy')
+                            ->options([
+                                'backtracking' => 'Backtracking (Strict Conflict Avoidance)',
+                                'balanced' => 'Balanced Distribution (Equal Spread)',
+                            ])
+                            ->default('backtracking')
+                            ->required(),
+                        ]),
                         Select::make('room_ids')
-                            ->label('5. Select Available Exam Rooms')
-                            ->multiple()
-                            ->options(function () {
-                                return Room::where('is_active', true)
-                                    ->get()
-                                    ->mapWithKeys(fn ($room) => [
-                                        $room->id => "{$room->room_number} (Cap: {$room->effective_capacity})",
-                                    ]);
-                            })
-                            ->searchable()
-                            ->preload()
-                            ->required()
-                            ->live(),
+                                ->label('6. Select Available Exam Rooms')
+                                ->multiple()
+                                ->options(function () {
+                                    return Room::where('is_active', true)
+                                        ->get()
+                                        ->mapWithKeys(fn ($room) => [
+                                            $room->id => "{$room->room_number} (Cap: {$room->effective_capacity})",
+                                        ]);
+                                })
+                                ->searchable()
+                                ->preload()
+                                ->required()
+                                ->live(),
+
+                        
                     ]),
 
-                // 👉 ডান পাশে: Smart Live Tracker (5 Columns)
-                FormSection::make('📊 Auto-Detected Session & Capacity Tracker')
+                // 👉 ডান পাশে: Smart Live Tracker Dashboard (5 Columns)
+                FormSection::make('📊 Live Schedule & Feasibility Tracker')
                     ->columnSpan(['default' => 12, 'lg' => 5])
                     ->schema([
 
-                        // 🎯 অটো-ডিটেক্টেড একাডেমিক সেশন, এনরোল্ড স্টুডেন্ট ও কোর্স সামারি
-                        Placeholder::make('session_auto_summary')
-                            ->label('Academic Session Breakdown')
+                        // 🎯 1. Dynamic Key Metrics (Visual Cards)
+                        Placeholder::make('live_metrics_summary')
+                            ->label('')
                             ->content(function (Get $get) {
                                 $examId = $get('exam_id');
-                                if (! $examId) {
-                                    return '⚠️ Select an Exam to auto-detect Enrolled Batches, Sections & Courses.';
-                                }
-
-                                $exam = Exam::with(['academicSession', 'department'])->find($examId);
-                                if (! $exam) {
-                                    return 'Exam not found.';
-                                }
-
-                                $sessionId = $exam->academic_session_id;
-                                $deptId = $exam->department_id;
-
-                                // ১. সেকশন কোর্স অ্যাসাইনমেন্ট থেকে ওই সেশন ও ডিপার্টমেন্টের অ্যাসাইনমেন্ট বের করা
-                                $assignments = SectionCourseAssignment::where('academic_session_id', $sessionId)
-                                    ->where('department_id', $deptId)
-                                    ->get();
-
-                                // 🔥 ইউনিক ব্যাচ এবং সেকশনের সংখ্যা হিসাব
-                                $totalBatches = $assignments->pluck('batch_id')->unique()->filter()->count();
-                                $totalSections = $assignments->pluck('section_id')->unique()->filter()->count();
-
-                                // কোর্স এবং অ্যাসাইনমেন্ট আইটেমের সংখ্যা
-                                $assignmentIds = $assignments->pluck('id');
-                                $totalAssignedCourses = SectionCourseAssignmentItem::whereIn('section_course_assignment_id', $assignmentIds)->count();
-
-                                // ২. এনরোল্ড স্টুডেন্ট কাউন্ট
-                                $totalEnrolledStudents = StudentCourseEnrollment::where('academic_session_id', $sessionId)
-                                    ->whereHas('student', fn ($q) => $q->where('department_id', $deptId))
-                                    ->count();
-
-                                $sessionName = $exam->academicSession?->name ?? 'Current Session';
-
-                                return "🎓 Session: {$sessionName}\n".
-                                       "🏢 Enrolled Scope: {$totalBatches} Batches  |  {$totalSections} Sections\n".
-                                       "👨‍🎓 Total Students: {$totalEnrolledStudents}\n".
-                                       "📚 Total Course Exams: {$totalAssignedCourses} Papers";
-                            }),
-
-                        Placeholder::make('schedule_days_summary')
-                            ->label('Duration & Available Slots')
-                            ->content(function (Get $get) {
-                                $examId = $get('exam_id');
+                                $roomIds = (array) $get('room_ids');
                                 $slotIds = (array) $get('exam_slot_ids');
                                 $holidays = (array) $get('holidays');
+                                $excludeLab = $get('exclude_lab_courses');
+                                $userCourseSelection = $get('max_courses_per_slot') ?? 'auto';
 
                                 if (! $examId) {
-                                    return 'Select exam first.';
+                                    return new HtmlString("
+                                        <div style='background: #F3F4F6; border-radius: 10px; padding: 15px; text-align: center; color: #6B7280; font-weight: 500;'>
+                                            👈 অনুগ্রহ করে বাম পাশে পরীক্ষা ও অন্যান্য তথ্য সিলেক্ট করুন।
+                                        </div>
+                                    ");
                                 }
 
                                 $exam = Exam::find($examId);
-                                if (! $exam || ! $exam->start_date || ! $exam->end_date) {
-                                    return 'Exam dates missing.';
+                                $sessionId = $exam->academic_session_id;
+                                $deptId = $exam->department_id;
+
+                                // Total Students & Batches
+                                $totalEnrolledStudents = StudentCourseEnrollment::where('academic_session_id', $sessionId)
+                                    ->whereHas('student', fn ($q) => $q->where('department_id', $deptId))
+                                    ->distinct('student_id')
+                                    ->count('student_id');
+
+                                $totalBatches = SectionCourseAssignment::where('academic_session_id', $sessionId)
+                                    ->where('department_id', $deptId)
+                                    ->pluck('batch_id')
+                                    ->unique()
+                                    ->count() ?: 1;
+
+                                $avgStudentsPerCourse = ceil($totalEnrolledStudents / $totalBatches);
+
+                                // Course Count
+                                $assignmentIds = SectionCourseAssignment::where('academic_session_id', $sessionId)
+                                    ->where('department_id', $deptId)
+                                    ->pluck('id');
+
+                                $courseQuery = SectionCourseAssignmentItem::whereIn('section_course_assignment_id', $assignmentIds);
+                                if ($excludeLab) {
+                                    $courseQuery->whereHas('course', fn ($q) => $q->where('type', '!=', 'lab'));
                                 }
+                                $totalExamsToSchedule = $courseQuery->distinct('course_id')->count('course_id');
 
-                                $startDate = Carbon::parse($exam->start_date);
-                                $endDate = Carbon::parse($exam->end_date);
-                                $totalDays = $startDate->diffInDays($endDate) + 1;
+                                // Room & Seats Capacity
+                                $selectedRooms = Room::whereIn('id', $roomIds)->get();
+                                $capacityPerSlot = $selectedRooms->sum('effective_capacity');
+                                $avgRoomCap = $selectedRooms->avg('effective_capacity') ?: 40;
 
-                                $holidayCount = count($holidays);
-                                $activeDays = max(0, $totalDays - $holidayCount);
+                                // Available Slots
+                                $totalDays = Carbon::parse($exam->start_date)->diffInDays(Carbon::parse($exam->end_date)) + 1;
+                                $activeDays = max(0, $totalDays - count($holidays));
                                 $totalAvailableSlots = $activeDays * count($slotIds);
 
-                                return '🗓️ Duration: '.$startDate->format('d M').' - '.$endDate->format('d M, Y')."\n".
-                                       "📅 Days: {$activeDays} Active Days ({$totalDays} Total - {$holidayCount} Off)\n".
-                                       "⏰ Available Slots: {$totalAvailableSlots} Total Slots";
+                                // Courses Per Slot Target
+                                $autoDetectedCourses = $avgStudentsPerCourse > 0 ? max(1, floor($capacityPerSlot / $avgStudentsPerCourse)) : 1;
+                                $effectiveCoursesPerSlot = ($userCourseSelection === 'auto') ? $autoDetectedCourses : (int) $userCourseSelection;
+
+                                // Calculations (Required Seats & Slots)
+                                $totalStudentsInSlot = $effectiveCoursesPerSlot * $avgStudentsPerCourse;
+                                $requiredSeatsPerSlot = ($effectiveCoursesPerSlot === 1) ? ($totalStudentsInSlot * 2) : $totalStudentsInSlot;
+                                $requiredRoomsPerSlot = ceil($requiredSeatsPerSlot / max(1, $avgRoomCap));
+                                $requiredSlotsTotal = ceil($totalExamsToSchedule / max(1, $effectiveCoursesPerSlot));
+
+                                // Badges/Colors
+                                $seatStatusColor = ($capacityPerSlot >= $requiredSeatsPerSlot && $requiredSeatsPerSlot > 0) ? '#10B981' : '#EF4444';
+                                $slotStatusColor = ($totalAvailableSlots >= $requiredSlotsTotal && $requiredSlotsTotal > 0) ? '#10B981' : '#EF4444';
+
+                                return new HtmlString("
+                                    <div style='display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-family: sans-serif;'>
+                                        
+                                        <!-- Card 1: Seats Breakdown -->
+                                        <div style='background: #FFFFFF; border: 1px solid #E5E7EB; border-left: 4px solid {$seatStatusColor}; padding: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);'>
+                                            <div style='font-size: 11px; font-weight: 600; text-transform: uppercase; color: #6B7280; letter-spacing: 0.5px;'>🪑 Seat Capacity / Slot</div>
+                                            <div style='margin-top: 6px; font-size: 18px; font-weight: 700; color: #111827;'>
+                                                <span style='color: {$seatStatusColor};'>{$capacityPerSlot}</span> <span style='font-size: 12px; color: #6B7280; font-weight: normal;'>/ {$requiredSeatsPerSlot} Req.</span>
+                                            </div>
+                                            <div style='margin-top: 4px; font-size: 11px; color: #4B5563;'>
+                                                Need ~<strong>{$requiredRoomsPerSlot} Rooms</strong> (Selected: ".count($roomIds).")
+                                            </div>
+                                        </div>
+
+                                        <!-- Card 2: Slots Breakdown -->
+                                        <div style='background: #FFFFFF; border: 1px solid #E5E7EB; border-left: 4px solid {$slotStatusColor}; padding: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);'>
+                                            <div style='font-size: 11px; font-weight: 600; text-transform: uppercase; color: #6B7280; letter-spacing: 0.5px;'>⏰ Exam Slots Needed</div>
+                                            <div style='margin-top: 6px; font-size: 18px; font-weight: 700; color: #111827;'>
+                                                <span style='color: {$slotStatusColor};'>{$totalAvailableSlots} Avail.</span> <span style='font-size: 12px; color: #6B7280; font-weight: normal;'>/ {$requiredSlotsTotal} Req.</span>
+                                            </div>
+                                            <div style='margin-top: 4px; font-size: 11px; color: #4B5563;'>
+                                                Total <strong>{$totalExamsToSchedule} Papers</strong> @ {$effectiveCoursesPerSlot}/Slot
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                ");
                             }),
 
-                        Placeholder::make('room_capacity_summary')
-                            ->label('Room Capacity Breakdown')
-                            ->content(function (Get $get) {
-                                $roomIds = (array) $get('room_ids');
-                                if (empty($roomIds)) {
-                                    return 'Select rooms to see capacity.';
-                                }
-
-                                $capacityPerSlot = Room::whereIn('id', $roomIds)->get()->sum('effective_capacity');
-
-                                $examId = $get('exam_id');
-                                $slotIds = (array) $get('exam_slot_ids');
-                                $holidays = (array) $get('holidays');
-
-                                $totalAvailableSlots = 0;
-                                if ($examId && ! empty($slotIds)) {
-                                    $exam = Exam::find($examId);
-                                    if ($exam && $exam->start_date && $exam->end_date) {
-                                        $totalDays = Carbon::parse($exam->start_date)->diffInDays(Carbon::parse($exam->end_date)) + 1;
-                                        $activeDays = max(0, $totalDays - count($holidays));
-                                        $totalAvailableSlots = $activeDays * count($slotIds);
-                                    }
-                                }
-
-                                $totalOverallCapacity = $capacityPerSlot * $totalAvailableSlots;
-
-                                return "🪑 {$capacityPerSlot} Seats / Slot\n🚀 {$totalOverallCapacity} Total Overall Capacity";
-                            }),
-
-                        Placeholder::make('feasibility_status')
-                            ->label('Feasibility Status')
+                        // 🎯 2. Structured Smart Status Alert Box
+                        Placeholder::make('actionable_feasibility_status')
+                            ->label('')
                             ->content(function (Get $get) {
                                 $examId = $get('exam_id');
                                 $roomIds = (array) $get('room_ids');
                                 $slotIds = (array) $get('exam_slot_ids');
                                 $holidays = (array) $get('holidays');
+                                $excludeLab = $get('exclude_lab_courses');
+                                $preventBackToBack = $get('prevent_back_to_back');
+                                $userCourseSelection = $get('max_courses_per_slot') ?? 'auto';
 
-                                if (! $examId || empty($roomIds) || empty($slotIds)) {
-                                    return 'Pending Exam, Slots, and Room selection...';
+                                if (! $examId) {
+                                    return null;
                                 }
 
                                 $exam = Exam::find($examId);
                                 $sessionId = $exam->academic_session_id;
                                 $deptId = $exam->department_id;
 
-                                // স্টুডেন্ট ও কোর্স কোয়েরি
+                                // Basic Data Fetching
                                 $totalEnrolledStudents = StudentCourseEnrollment::where('academic_session_id', $sessionId)
                                     ->whereHas('student', fn ($q) => $q->where('department_id', $deptId))
-                                    ->count();
+                                    ->distinct('student_id')
+                                    ->count('student_id');
+
+                                $totalBatches = SectionCourseAssignment::where('academic_session_id', $sessionId)
+                                    ->where('department_id', $deptId)
+                                    ->pluck('batch_id')
+                                    ->unique()
+                                    ->count() ?: 1;
+
+                                $avgStudentsPerCourse = ceil($totalEnrolledStudents / $totalBatches);
 
                                 $assignmentIds = SectionCourseAssignment::where('academic_session_id', $sessionId)
                                     ->where('department_id', $deptId)
                                     ->pluck('id');
 
-                                $totalExamsToSchedule = SectionCourseAssignmentItem::whereIn('section_course_assignment_id', $assignmentIds)->count();
+                                $courseQuery = SectionCourseAssignmentItem::whereIn('section_course_assignment_id', $assignmentIds);
+                                if ($excludeLab) {
+                                    $courseQuery->whereHas('course', fn ($q) => $q->where('type', '!=', 'lab'));
+                                }
+                                $totalExamsToSchedule = $courseQuery->distinct('course_id')->count('course_id');
 
-                                $capacityPerSlot = Room::whereIn('id', $roomIds)->get()->sum('effective_capacity');
+                                $selectedRooms = Room::whereIn('id', $roomIds)->get();
+                                $capacityPerSlot = $selectedRooms->sum('effective_capacity');
+                                $avgRoomCap = $selectedRooms->avg('effective_capacity') ?: 40;
 
                                 $totalDays = Carbon::parse($exam->start_date)->diffInDays(Carbon::parse($exam->end_date)) + 1;
                                 $activeDays = max(0, $totalDays - count($holidays));
                                 $totalAvailableSlots = $activeDays * count($slotIds);
 
-                                if ($capacityPerSlot < $totalEnrolledStudents) {
-                                    return "⚠️ WARNING! Room capacity per slot ({$capacityPerSlot}) is less than total enrolled students ({$totalEnrolledStudents}). Add more rooms!";
+                                $autoDetectedCourses = $avgStudentsPerCourse > 0 ? max(1, floor($capacityPerSlot / $avgStudentsPerCourse)) : 1;
+                                $effectiveCoursesPerSlot = ($userCourseSelection === 'auto') ? $autoDetectedCourses : (int) $userCourseSelection;
+
+                                $totalStudentsInSlot = $effectiveCoursesPerSlot * $avgStudentsPerCourse;
+                                $requiredSeatsPerSlot = ($effectiveCoursesPerSlot === 1) ? ($totalStudentsInSlot * 2) : $totalStudentsInSlot;
+                                $requiredSlotsTotal = ceil($totalExamsToSchedule / max(1, $effectiveCoursesPerSlot));
+
+                                // Validations & Actionable Instructions
+                                $issues = [];
+
+                                if (empty($slotIds)) {
+                                    $issues[] = '👉 <strong>স্লট বাছাই করুন:</strong> অন্তত ১টি Daily Slot/Shift নির্বাচন করুন।';
                                 }
 
-                                if ($totalAvailableSlots < $totalExamsToSchedule) {
-                                    return "⚠️ WARNING! You have {$totalExamsToSchedule} course exams to schedule, but only {$totalAvailableSlots} available slots. Increase daily slots or reduce holidays!";
+                                if (empty($roomIds)) {
+                                    $issues[] = '👉 <strong>রুম সিলেক্ট করুন:</strong> বাম পাশ থেকে রুম সিলেক্ট না করলে সিট ক্যালকুলেশন সম্ভব নয়।';
+                                } elseif ($capacityPerSlot < $requiredSeatsPerSlot) {
+                                    $shortageSeats = $requiredSeatsPerSlot - $capacityPerSlot;
+                                    $shortageRooms = ceil($shortageSeats / max(1, $avgRoomCap));
+                                    $issues[] = "👉 <strong>রুম বাড়ান:</strong> আপনার সিলেক্ট করা সিটে ঘাটতি রয়েছে! আরও অন্তত <strong>{$shortageSeats} টি সিট</strong> (কমপক্ষে <strong>{$shortageRooms} টি রুম</strong>) যোগ করুন।";
                                 }
 
-                                return "✅ FEASIBLE! Capacity ({$capacityPerSlot}/slot) and Slots ({$totalAvailableSlots}) can accommodate all {$totalEnrolledStudents} students across {$totalExamsToSchedule} exams.";
+                                if (! empty($slotIds) && $totalAvailableSlots < $requiredSlotsTotal) {
+                                    $shortageSlots = $requiredSlotsTotal - $totalAvailableSlots;
+                                    $issues[] = "👉 <strong>স্লট বা দিন বাড়ান:</strong> সকল কোর্স নিতে আরও <strong>{$shortageSlots} টি স্লট</strong> প্রয়োজন। আরও Shift যোগ করুন, ছুটির দিন কমান, অথবা Exam Duration বাড়ান।";
+                                }
+
+                                // Back-to-Back Warning Validation
+                                if ($preventBackToBack && count($slotIds) > 1 && $activeDays > 0) {
+                                    $dailySlotsCount = count($slotIds);
+                                    if ($dailySlotsCount == 2 && $requiredSlotsTotal > $activeDays) {
+                                        $issues[] = '⚠️ <strong>Back-to-Back সংঘাত ঝুঁকি:</strong> একই দিনে ২ টি স্লট বেছে নিয়েছেন এবং Back-to-Back ব্লক चालू রাখা হয়েছে। একই ব্যাচের পরপর ২ স্লটে পরীক্ষা রোধ করতে <strong>পরীক্ষার দিন সংখ্যা বাড়ান</strong> অথবা <strong>Daily Slots বাড়ান</strong>।';
+                                    }
+                                }
+
+                                // 🔴 CASE 1: If Any Issues Found
+                                if (! empty($issues)) {
+                                    $issuesListHtml = '';
+                                    foreach ($issues as $issue) {
+                                        $issuesListHtml .= "<li style='margin-bottom: 6px;'>{$issue}</li>";
+                                    }
+
+                                    return new HtmlString("
+                                        <div style='background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 8px; padding: 14px; margin-top: 10px;'>
+                                            <div style='display: flex; align-items: center; gap: 8px; color: #991B1B; font-weight: 700; font-size: 14px;'>
+                                                <span>⚠️ করণীয় (Action Required)</span>
+                                            </div>
+                                            <ul style='margin-top: 8px; margin-bottom: 0; padding-left: 18px; color: #7F1D1D; font-size: 13px; line-height: 1.6;'>
+                                                {$issuesListHtml}
+                                            </ul>
+                                        </div>
+                                    ");
+                                }
+
+                                // 🟢 CASE 2: All Perfectly Feasible
+                                $courseScopeLabel = $excludeLab ? 'Theory Only (Labs Excluded)' : 'Theory & Labs Included';
+                                $b2bText = $preventBackToBack ? ' [🚫 Back-to-Back Blocked]' : '';
+
+                                return new HtmlString("
+                                    <div style='background: #ECFDF5; border: 1px solid #6EE7B7; border-radius: 8px; padding: 14px; margin-top: 10px;'>
+                                        <div style='display: flex; align-items: center; gap: 8px; color: #065F46; font-weight: 700; font-size: 14px;'>
+                                            <span>✅ সিডিউল সম্পূর্ণ পারফেক্ট! (Ready to Generate)</span>
+                                        </div>
+                                        <div style='margin-top: 8px; color: #047857; font-size: 12px; line-height: 1.6;'>
+                                            • <strong>কোর্স স্কোর:</strong> {$totalExamsToSchedule} Papers ({$courseScopeLabel})<br>
+                                            • <strong>নিয়মকানুন:</strong>একই ব্যাচের/সেকশনের ব্যাক-টু-ব্যাক স্লট পরীক্ষা ব্লক করা আছে{$b2bText}।<br>
+                                            • <strong>স্লট ব্যবহার:</strong> মোট {$totalAvailableSlots} টি স্লটের মধ্যে <strong>{$requiredSlotsTotal} টি</strong> ব্যবহৃত হবে।
+                                        </div>
+                                    </div>
+                                ");
+                            }),
+
+                        // 🎯 3. Detail Session Info Snapshot
+                        Placeholder::make('session_info_table')
+                            ->label('')
+                            ->content(function (Get $get) {
+                                $examId = $get('exam_id');
+                                $excludeLab = $get('exclude_lab_courses');
+                                if (! $examId) {
+                                    return null;
+                                }
+
+                                $exam = Exam::with(['academicSession', 'department'])->find($examId);
+                                if (! $exam) {
+                                    return null;
+                                }
+
+                                $sessionId = $exam->academic_session_id;
+                                $deptId = $exam->department_id;
+
+                                $assignments = SectionCourseAssignment::where('academic_session_id', $sessionId)
+                                    ->where('department_id', $deptId)->get();
+
+                                $totalBatches = $assignments->pluck('batch_id')->unique()->filter()->count();
+                                $totalSections = $assignments->pluck('section_id')->unique()->filter()->count();
+
+                                $assignmentIds = $assignments->pluck('id');
+                                $courseQuery = SectionCourseAssignmentItem::whereIn('section_course_assignment_id', $assignmentIds);
+                                if ($excludeLab) {
+                                    $courseQuery->whereHas('course', fn ($q) => $q->where('type', '!=', 'lab'));
+                                }
+                                $totalExamsToSchedule = $courseQuery->distinct('course_id')->count('course_id');
+
+                                $totalEnrolledStudents = StudentCourseEnrollment::where('academic_session_id', $sessionId)
+                                    ->whereHas('student', fn ($q) => $q->where('department_id', $deptId))
+                                    ->distinct('student_id')
+                                    ->count('student_id');
+
+                                $avgStudentsPerCourse = ($totalBatches > 0) ? ceil($totalEnrolledStudents / $totalBatches) : 0;
+
+                                return new HtmlString("
+                                    <div style='background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; font-size: 12px; color: #374151; margin-top: 5px;'>
+                                        <div style='font-weight: 700; color: #111827; margin-bottom: 8px; font-size: 12px;'>📌 Quick Info Snapshot</div>
+                                        <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px;'>
+                                            <div style='background: #FFFFFF; border: 1px solid #F3F4F6; padding: 6px 8px; border-radius: 6px;'>🎓 <strong>Session:</strong> {$exam->academicSession?->name}</div>
+                                            <div style='background: #FFFFFF; border: 1px solid #F3F4F6; padding: 6px 8px; border-radius: 6px;'>👨‍🎓 <strong>Total Enrolled:</strong> {$totalEnrolledStudents} Students</div>
+                                            <div style='background: #FFFFFF; border: 1px solid #F3F4F6; padding: 6px 8px; border-radius: 6px;'>🏢 <strong>Batches:</strong> {$totalBatches} ({$totalSections} Sections)</div>
+                                            <div style='background: #FFFFFF; border: 1px solid #F3F4F6; padding: 6px 8px; border-radius: 6px;'>📚 <strong>Exams:</strong> {$totalExamsToSchedule} Papers</div>
+                                            
+                                            <div style='grid-column: span 2; background: #EEF2FF; border: 1px solid #C7D2FE; padding: 6px 8px; border-radius: 6px; color: #3730A3;'>
+                                                📊 <strong>Avg. Students / Course:</strong> ~{$avgStudentsPerCourse} Students / Batch
+                                            </div>
+                                        </div>
+                                    </div>
+                                ");
                             }),
                     ]),
 

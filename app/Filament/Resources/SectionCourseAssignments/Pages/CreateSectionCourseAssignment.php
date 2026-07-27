@@ -3,11 +3,14 @@
 namespace App\Filament\Resources\SectionCourseAssignments\Pages;
 
 use App\Filament\Resources\SectionCourseAssignments\SectionCourseAssignmentResource;
+use App\Models\SectionCourseAssignment;
 use App\Models\Student;
 use App\Models\StudentCourseEnrollment;
 use App\Models\StudentEnrollmentCourse;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Support\Facades\DB;
+use Filament\Notifications\Notification;
+use Illuminate\Validation\ValidationException;
 
 class CreateSectionCourseAssignment extends CreateRecord
 {
@@ -46,7 +49,7 @@ class CreateSectionCourseAssignment extends CreateRecord
                 $enrollment = StudentCourseEnrollment::firstOrCreate(
                     [
                         'academic_session_id' => $academicSessionId,
-                        'student_id'          => $studentId,
+                        'student_id' => $studentId,
                     ],
                     [
                         'status' => 'approved', // বা আপনার প্রয়োজনমত 'active' / 'pending'
@@ -58,11 +61,11 @@ class CreateSectionCourseAssignment extends CreateRecord
                     StudentEnrollmentCourse::updateOrCreate(
                         [
                             'student_course_enrollment_id' => $enrollment->id,
-                            'course_id'                    => $courseId,
+                            'course_id' => $courseId,
                         ],
                         [
                             'enrollment_type' => 'regular', // বা ডিফল্ট টাইপ
-                            'status'          => 'enrolled',
+                            'status' => 'enrolled',
                         ]
                     );
                 }
