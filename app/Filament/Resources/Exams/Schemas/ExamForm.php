@@ -11,12 +11,16 @@ use App\Models\Room;
 use App\Models\SectionCourseAssignment;
 use App\Models\SectionCourseAssignmentItem;
 use App\Models\StudentEnrollmentCourse;
+use Carbon\Carbon;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -29,13 +33,13 @@ class ExamForm
     public static function configure(Schema $schema): Schema
     {
         return $schema
-            ->columns(12) 
+            ->columns(12)
             ->components([
-                // 📌 বাম পাশের কলাম (৪ গ্রিড) - Exam Details
+                // 📌 বাম পাশের কলাম (৪ গ্রিড) - Exam Details & Seating Capacity
                 Section::make('Exam Details')
                     ->columnSpan([
                         'default' => 12,
-                        'lg' => 4, 
+                        'lg' => 4,
                     ])
                     ->schema([
                         Select::make('department_id')
@@ -61,12 +65,12 @@ class ExamForm
                         DatePicker::make('start_date')
                             ->label('Start Date')
                             ->native(false)
-                            ->minDate(now()) 
-                            ->live() 
+                            ->minDate(now())
+                            ->live()
                             ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                 $schedules = $get('schedules') ?? [];
 
-                                if (!empty($schedules)) {
+                                if (! empty($schedules)) {
                                     $schedules[array_key_first($schedules)]['date'] = $state;
                                 } else {
                                     $schedules[] = ['date' => $state, 'slot_details' => []];
@@ -75,6 +79,50 @@ class ExamForm
                                 $set('schedules', $schedules);
                             })
                             ->required(),
+
+                        Select::make('algorithm_type')
+                            ->label('Seating Algorithm')
+                            ->options([
+                                'zig_zag_mixing' => 'Zig Zag Mixing (Cross Pattern)',
+                                'column_separate' => 'Column Separate (Alternate Columns)',
+                            ])
+                            ->default('zig_zag_mixing')
+                            ->live()
+                            ->required(),
+
+                        Checkbox::make('skip_lab_courses')
+                            ->label('Skip Lab / Practical Courses')
+                            ->helperText('চেক দেওয়া থাকলে শুধু থিওরি কোর্সগুলো শো করবে।')
+                            ->default(true)
+                            ->live(),
+
+                        Placeholder::make('effective_capacity_info')
+                            ->hiddenLabel()
+                            ->content(function (Get $get) {
+                                $algorithm = $get('algorithm_type') ?? 'zig_zag_mixing';
+
+                                $totalEffectiveSeats = Room::where('is_active', true)
+                                    ->get()
+                                    ->sum(fn ($room) => $room->effective_capacity);
+
+                                if ($algorithm === 'column_separate') {
+                                    $algorithmText = 'Column Separate Mode: পাশাপাশি কলামে ভিন্ন ব্যাচ বসবে। একক ব্যাচ হলে ১টি করে কলাম ফাঁকা থাকবে।';
+                                } else {
+                                    $algorithmText = 'Zig Zag Mixing Mode: ভিন্ন ব্যাচের শিক্ষার্থীরা পাশাপাশি ও সামনে-পেছনে জিক-জ্যাক মিক্সিং হয়ে বসবে।';
+                                }
+
+                                return new HtmlString("
+                                    <div class='p-3.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg space-y-1.5 mt-2'>
+                                        <div class='flex justify-between items-center'>
+                                            <span class='text-xs font-semibold text-gray-500 dark:text-gray-400'>Active Total Effective Seats:</span>
+                                            <span class='text-xs font-bold text-emerald-600 dark:text-emerald-400'>{$totalEffectiveSeats} Seats</span>
+                                        </div>
+                                        <p class='text-[11px] text-gray-500 dark:text-gray-400 leading-tight border-t border-gray-200 dark:border-gray-800 pt-1.5'>
+                                            💡 {$algorithmText}
+                                        </p>
+                                    </div>
+                                ");
+                            }),
                     ]),
 
                 // 📌 ডান পাশের কলাম (৮ গ্রিড) - Schedules Repeater
@@ -84,11 +132,168 @@ class ExamForm
                         'lg' => 8,
                     ])
                     ->hiddenLabel()
+                    ->collapsible()
+                    ->itemLabel(function (array $state): ?string {
+                        return ! empty($state['date']) ? Carbon::parse($state['date'])->format('M d, Y (l)') : 'Exam Date Row';
+                    })
                     ->hidden(fn (Get $get): bool => ! $get('start_date'))
-                    ->addActionLabel('+ Add Exam Date Row')
+                    ->addAction(function (Action $action) {
+                        return $action
+                            ->label('+ Add Exam Date Row')
+                            ->action(function (array $arguments, Repeater $component, Get $get) {
+                                $state = $component->getState();
+                                $lastRow = end($state);
+
+                                $lastDateStr = $lastRow['date'] ?? $get('start_date');
+
+                                if ($lastDateStr) {
+                                    $nextDate = Carbon::parse($lastDateStr)->addDay();
+
+                                    if ($nextDate->isSunday()) {
+                                        $skippedSunday = $nextDate->format('d M, Y');
+                                        $nextDate->addDay();
+
+                                        Notification::make()
+                                            ->warning()
+                                            ->title('Sunday Skipped!')
+                                            ->body("The next day {$skippedSunday} is Sunday. Automatically skipped to Monday ({$nextDate->format('d M, Y')}).")
+                                            ->persistent()
+                                            ->send();
+                                    }
+
+                                    $newDateStr = $nextDate->format('Y-m-d');
+                                } else {
+                                    $newDateStr = now()->format('Y-m-d');
+                                }
+
+                                $state[] = [
+                                    'date' => $newDateStr,
+                                    'exam_slots' => [],
+                                    'slot_details' => [],
+                                ];
+
+                                $component->state($state);
+                            });
+                    })
                     ->defaultItems(1)
+                    ->rules([
+                        fn (Get $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
+                            $schedules = $value ?? [];
+                            $sessionId = $get('academic_session_id');
+
+                            $totalEffectiveSeats = Room::where('is_active', true)
+                                ->get()
+                                ->sum(fn ($room) => $room->effective_capacity);
+
+                            // ডেটাবেজের সমস্ত আসল স্লট ক্রমানুসারে নিয়ে রাখা
+                            $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
+
+                            foreach ($schedules as $sIndex => $schedule) {
+                                $dateStr = ! empty($schedule['date']) ? Carbon::parse($schedule['date'])->format('d M, Y') : 'Row #'.($sIndex + 1);
+
+                                if (empty($schedule['exam_slots'])) {
+                                    $fail("{$dateStr} তারিখের জন্য কোনো Exam Slot নির্বাচন করা হয়নি।");
+
+                                    return;
+                                }
+
+                                $slotDetails = $schedule['slot_details'] ?? [];
+
+                                foreach ($slotDetails as $slot) {
+                                    $slotId = $slot['exam_slot_id'] ?? null;
+                                    $slotModel = ExamSlot::find($slotId);
+                                    $slotName = $slotModel?->name ?? 'Slot';
+
+                                    $batchCourses = $slot['batch_courses'] ?? [];
+
+                                    if (empty($batchCourses)) {
+                                        $fail("{$dateStr} তারিখের {$slotName}-এ অন্তত ১টি Batch ও Course যোগ করুন।");
+
+                                        return;
+                                    }
+
+                                    $currentSlotBatchIds = [];
+                                    $totalSlotStudents = 0;
+
+                                    foreach ($batchCourses as $bc) {
+                                        $bId = $bc['batch_id'] ?? null;
+                                        $cId = $bc['course_id'] ?? null;
+
+                                        if ($bId && ! $cId) {
+                                            $batchNum = Batch::find($bId)?->batch_number ?? 'Batch';
+                                            $fail("{$dateStr} -> {$slotName}: {$batchNum} ব্যাচের জন্য Course নির্বাচন করা হয়নি।");
+
+                                            return;
+                                        }
+
+                                        if ($bId && $cId) {
+                                            $currentSlotBatchIds[] = $bId;
+
+                                            $totalSlotStudents += StudentEnrollmentCourse::query()
+                                                ->where('course_id', $cId)
+                                                ->whereHas('studentCourseEnrollment', function ($q) use ($bId, $sessionId) {
+                                                    if ($sessionId) {
+                                                        $q->where('academic_session_id', $sessionId);
+                                                    }
+                                                    $q->whereHas('student', fn ($sq) => $sq->where('batch_id', $bId));
+                                                })
+                                                ->count();
+                                        }
+                                    }
+
+                                    // ৪. ক্যাপাসিটি চেক
+                                    $batchCount = count(array_unique($currentSlotBatchIds));
+                                    $maxAllowed = ($batchCount <= 1) ? floor($totalEffectiveSeats / 2) : $totalEffectiveSeats;
+
+                                    if ($totalSlotStudents > $maxAllowed) {
+                                        $fail("{$dateStr} -> {$slotName}: মোট শিক্ষার্থী ({$totalSlotStudents}) আপনার সর্বোচ্চ রুম ধারণক্ষমতা ({$maxAllowed}) ছাড়িয়ে গেছে!");
+
+                                        return;
+                                    }
+
+                                    // 🟢 ৫. টাইম-সিকোয়েন্স ব্যাক-টু-ব্যাক ভ্যালিডেশন
+                                    $currentMasterIndex = array_search($slotId, $allMasterSlots);
+
+                                    if ($currentMasterIndex !== false) {
+                                        // ঠিক আগের আসল স্লট
+                                        $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
+                                        if ($prevMasterSlotId) {
+                                            $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
+                                            if ($prevSlotDetail) {
+                                                $prevBatchIds = collect($prevSlotDetail['batch_courses'] ?? [])->pluck('batch_id')->filter()->toArray();
+                                                $commonBatches = array_intersect($prevBatchIds, $currentSlotBatchIds);
+
+                                                if (! empty($commonBatches)) {
+                                                    $matchedNames = Batch::whereIn('id', $commonBatches)->pluck('batch_number')->implode(', ');
+                                                    $fail("{$dateStr}: Batch {$matchedNames} ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
+
+                                                    return;
+                                                }
+                                            }
+                                        }
+
+                                        // ঠিক পরের আসল স্লট
+                                        $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
+                                        if ($nextMasterSlotId) {
+                                            $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
+                                            if ($nextSlotDetail) {
+                                                $nextBatchIds = collect($nextSlotDetail['batch_courses'] ?? [])->pluck('batch_id')->filter()->toArray();
+                                                $commonBatches = array_intersect($nextBatchIds, $currentSlotBatchIds);
+
+                                                if (! empty($commonBatches)) {
+                                                    $matchedNames = Batch::whereIn('id', $commonBatches)->pluck('batch_number')->implode(', ');
+                                                    $fail("{$dateStr}: Batch {$matchedNames} ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
+
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    ])
                     ->schema([
-                        // 🔹 ১. প্রথম রো: তারিখ ও স্লট চেকবক্স
                         Grid::make(12)
                             ->schema([
                                 DatePicker::make('date')
@@ -102,21 +307,28 @@ class ExamForm
 
                                 CheckboxList::make('exam_slots')
                                     ->hiddenLabel()
-                                    ->options(ExamSlot::pluck('name', 'id'))
+                                    ->options(function () {
+                                        return ExamSlot::query()
+                                            ->orderBy('start_time', 'asc')
+                                            ->pluck('name', 'id');
+                                    })
                                     ->columns(4)
                                     ->gridDirection('row')
                                     ->live()
                                     ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                         $selectedSlotIds = $state ?? [];
                                         $currentSlotDetails = $get('slot_details') ?? [];
-                                        
+
+                                        $orderedSlots = ExamSlot::whereIn('id', $selectedSlotIds)
+                                            ->orderBy('start_time', 'asc')
+                                            ->get();
+
                                         $newSlotDetails = [];
-                                        foreach ($selectedSlotIds as $slotId) {
-                                            $existing = collect($currentSlotDetails)->firstWhere('exam_slot_id', $slotId);
+                                        foreach ($orderedSlots as $slot) {
+                                            $existing = collect($currentSlotDetails)->firstWhere('exam_slot_id', $slot->id);
                                             $newSlotDetails[] = $existing ?? [
-                                                'exam_slot_id' => $slotId,
+                                                'exam_slot_id' => $slot->id,
                                                 'batch_courses' => [],
-                                                'room_ids' => []
                                             ];
                                         }
                                         $set('slot_details', $newSlotDetails);
@@ -125,84 +337,87 @@ class ExamForm
                                     ->columnSpan(8),
                             ]),
 
-                        // 🔹 ২. স্লটভিত্তিক রো
                         Repeater::make('slot_details')
                             ->hiddenLabel()
                             ->hidden(fn (Get $get): bool => empty($get('exam_slots')))
                             ->addable(false)
                             ->deletable(false)
                             ->reorderable(false)
-                            ->extraAttributes([
-                                'class' => '[&_.fi-fo-repeater-item-header]:!hidden [&_.fi-fo-repeater-item]:!bg-transparent [&_.fi-fo-repeater-item]:!border-0 [&_.fi-fo-repeater-item]:!shadow-none [&_.fi-fo-repeater-item]:!p-0'
-                            ])
-                            ->schema([
-                                // 🟢 স্লট হেডার: স্পেসিং ও সুন্দর ব্যাজ লেআউট
-                                Placeholder::make('slot_title')
-                                    ->hiddenLabel()
-                                    ->content(function (Get $get) {
-                                        $slotId = $get('exam_slot_id');
-                                        $slotName = ExamSlot::find($slotId)?->name ?? 'Exam Slot';
+                            ->collapsible()
+                            ->itemLabel(function (array $state, Get $get): HtmlString {
+                                $slotId = $state['exam_slot_id'] ?? null;
+                                $slotName = ExamSlot::find($slotId)?->name ?? 'Exam Slot';
 
-                                        $batchCourses = $get('batch_courses') ?? [];
-                                        $sessionId = $get('academic_session_id') 
-                                                  ?? $get('../../../../../academic_session_id')
-                                                  ?? $get('../../../../../../academic_session_id');
+                                $batchCourses = $state['batch_courses'] ?? [];
+                                $sessionId = $get('academic_session_id')
+                                          ?? $get('../../../../../academic_session_id')
+                                          ?? $get('../../../../../../academic_session_id');
 
-                                        $totalSlotStudents = 0;
-                                        $uniqueBatches = [];
+                                $totalSlotStudents = 0;
+                                $uniqueBatches = [];
 
-                                        foreach ($batchCourses as $item) {
-                                            $bId = $item['batch_id'] ?? null;
-                                            $cId = $item['course_id'] ?? null;
+                                foreach ($batchCourses as $item) {
+                                    $bId = $item['batch_id'] ?? null;
+                                    $cId = $item['course_id'] ?? null;
 
-                                            if ($bId) {
-                                                $uniqueBatches[$bId] = true;
-                                                if ($cId) {
-                                                    $totalSlotStudents += StudentEnrollmentCourse::query()
-                                                        ->where('course_id', $cId)
-                                                        ->whereHas('studentCourseEnrollment', function ($q) use ($bId, $sessionId) {
-                                                            if ($sessionId) {
-                                                                $q->where('academic_session_id', $sessionId);
-                                                            }
-                                                            $q->whereHas('student', fn ($sq) => $sq->where('batch_id', $bId));
-                                                        })
-                                                        ->count();
-                                                } else {
-                                                    $batch = Batch::find($bId);
-                                                    if ($batch && method_exists($batch, 'students')) {
-                                                        $totalSlotStudents += $batch->students()->count();
+                                    if ($bId) {
+                                        $uniqueBatches[$bId] = true;
+                                        if ($cId) {
+                                            $totalSlotStudents += StudentEnrollmentCourse::query()
+                                                ->where('course_id', $cId)
+                                                ->whereHas('studentCourseEnrollment', function ($q) use ($bId, $sessionId) {
+                                                    if ($sessionId) {
+                                                        $q->where('academic_session_id', $sessionId);
                                                     }
-                                                }
+                                                    $q->whereHas('student', fn ($sq) => $sq->where('batch_id', $bId));
+                                                })
+                                                ->count();
+                                        } else {
+                                            $batch = Batch::find($bId);
+                                            if ($batch && method_exists($batch, 'students')) {
+                                                $totalSlotStudents += $batch->students()->count();
                                             }
                                         }
+                                    }
+                                }
 
-                                        // লজিক: একক ব্যাচ হলে দ্বিগুণ সিট (২ x স্টুডেন্ট) লাগবে
-                                        $batchCount = count($uniqueBatches);
-                                        $requiredSeats = ($batchCount === 1) ? ($totalSlotStudents * 2) : $totalSlotStudents;
+                                $totalEffectiveSeats = Room::where('is_active', true)
+                                    ->get()
+                                    ->sum(fn ($room) => $room->effective_capacity);
 
-                                        return new HtmlString("
-                                            <div class='flex flex-wrap items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2 mt-5 mb-3 gap-2'>
-                                                <span class='font-bold text-base text-gray-800 dark:text-gray-100'>{$slotName}</span>
-                                                <div class='flex items-center gap-2'>
-                                                    <span class='text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 px-3 py-1 rounded-full border border-blue-200 dark:border-blue-800'>
-                                                        Total Std: <b>{$totalSlotStudents}</b>
-                                                    </span>
-                                                    <span class='text-xs font-semibold bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-300 px-3 py-1 rounded-full border border-amber-200 dark:border-amber-800'>
-                                                        Required Seats: <b>{$requiredSeats}</b>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ");
-                                    }),
+                                $batchCount = count($uniqueBatches);
 
-                                // 🔹 ব্যাচ ও কোর্স রিপিটার
+                                if ($batchCount <= 1) {
+                                    $maxAllowed = floor($totalEffectiveSeats / 2);
+                                    $notice = ' (Single Batch Limit)';
+                                } else {
+                                    $maxAllowed = $totalEffectiveSeats;
+                                    $notice = '';
+                                }
+
+                                $isOverflow = $totalSlotStudents > $maxAllowed;
+
+                                $badgeColor = $isOverflow
+                                    ? 'bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'
+                                    : 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+
+                                return new HtmlString("
+                                    <div class='flex items-center justify-between w-full pr-4'>
+                                        <span class='font-bold text-sm text-gray-800 dark:text-gray-100'>{$slotName}</span>
+                                        <span class='text-xs font-semibold {$badgeColor} px-3 py-0.5 rounded-full border'>
+                                            Slot Selected Std: <b>{$totalSlotStudents}</b> / {$maxAllowed} Max{$notice}
+                                        </span>
+                                    </div>
+                                ");
+                            })
+                            ->schema([
                                 Repeater::make('batch_courses')
                                     ->hiddenLabel()
                                     ->addActionLabel('+ Add Batch')
                                     ->reorderable(false)
                                     ->defaultItems(1)
                                     ->extraAttributes([
-                                        'class' => '[&_.fi-fo-repeater-item-header]:!hidden [&_.fi-fo-repeater-item]:!bg-transparent [&_.fi-fo-repeater-item]:!border-0 [&_.fi-fo-repeater-item]:!shadow-none [&_.fi-fo-repeater-item]:!p-0 [&_.fi-fo-repeater-item]:!mb-2'
+                                        'class' => '[&_.fi-fo-repeater-item-header]:!hidden [&_.fi-fo-repeater-item]:!bg-transparent [&_.fi-fo-repeater-item]:!border-0 [&_.fi-fo-repeater-item]:!shadow-none [&_.fi-fo-repeater-item]:!p-0 [&_.fi-fo-repeater-item]:!mb-2',
                                     ])
                                     ->schema([
                                         Grid::make(12)
@@ -211,11 +426,12 @@ class ExamForm
                                                     ->hiddenLabel()
                                                     ->placeholder('Select Batch')
                                                     ->options(function (Get $get) {
-                                                        $deptId = $get('department_id') 
+                                                        // ১. ডিপার্টমেন্ট ও সেশন অনুযায়ী অ্যাসাইন করা ব্যাচসমূহ ফিল্টার
+                                                        $deptId = $get('department_id')
                                                                 ?? $get('../../../../../department_id')
                                                                 ?? $get('../../../../../../department_id');
 
-                                                        $sessionId = $get('academic_session_id') 
+                                                        $sessionId = $get('academic_session_id')
                                                                   ?? $get('../../../../../academic_session_id')
                                                                   ?? $get('../../../../../../academic_session_id');
 
@@ -240,6 +456,7 @@ class ExamForm
 
                                                         $query = Batch::whereIn('id', $assignedBatchIds);
 
+                                                        // 🟢 ২. একই স্লটের ভেতরে একই ব্যাচ একাধিকবার সিলেক্ট না করার ফিল্টার
                                                         $siblingBatchCourses = $get('../') ?? [];
                                                         $currentBatchId = $get('batch_id');
 
@@ -249,8 +466,60 @@ class ExamForm
                                                             ->reject(fn ($id) => $id == $currentBatchId)
                                                             ->toArray();
 
-                                                        if (!empty($usedBatchIds)) {
-                                                            $query->whereNotIn('id', $usedBatchIds);
+                                                        // 🟢 ৩. রিয়েল টাইম-সিকোয়েন্স অনুযায়ী ব্যাক-টু-ব্যাক স্লট ফিল্টারিং
+                                                        $currentSlotId = $get('../../exam_slot_id');
+                                                        $schedules = $get('../../../../../../schedules')
+                                                                  ?? $get('../../../../../schedules')
+                                                                  ?? [];
+
+                                                        foreach ($schedules as $schedule) {
+                                                            $slotDetails = $schedule['slot_details'] ?? [];
+
+                                                            if (empty($slotDetails)) {
+                                                                continue;
+                                                            }
+
+                                                            // ডেটাবেজ থেকে সমস্ত অ্যাক্টিভ স্লট সময় অনুযায়ী নিয়ে তাদের আসল র‍্যাঙ্ক/ইন্ডেক্স তৈরি
+                                                            $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
+
+                                                            // বর্তমান স্লটটির ডেটাবেজ সিকোয়েন্স ইনডেক্স কত?
+                                                            $currentMasterIndex = array_search($currentSlotId, $allMasterSlots);
+
+                                                            if ($currentMasterIndex !== false) {
+                                                                // ক) ঠিক আগের আসল স্লট (Master Index - 1)
+                                                                $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
+                                                                if ($prevMasterSlotId) {
+                                                                    // চেক করা এই আগের স্লটটি কি ইউজার বর্তমানে ফর্মে সিলেক্ট করেছে?
+                                                                    $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
+                                                                    if ($prevSlotDetail) {
+                                                                        foreach ($prevSlotDetail['batch_courses'] ?? [] as $bc) {
+                                                                            if (! empty($bc['batch_id'])) {
+                                                                                $usedBatchIds[] = $bc['batch_id'];
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+
+                                                                // খ) ঠিক পরের আসল স্লট (Master Index + 1)
+                                                                $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
+                                                                if ($nextMasterSlotId) {
+                                                                    // চেক করা এই পরের স্লটটি কি ইউজার বর্তমানে ফর্মে সিলেক্ট করেছে?
+                                                                    $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
+                                                                    if ($nextSlotDetail) {
+                                                                        foreach ($nextSlotDetail['batch_courses'] ?? [] as $bc) {
+                                                                            if (! empty($bc['batch_id'])) {
+                                                                                $usedBatchIds[] = $bc['batch_id'];
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                break;
+                                                            }
+                                                        }
+
+                                                        // ফিল্টার করে ফাইনাল অপশন ব্যাক করা
+                                                        if (! empty($usedBatchIds)) {
+                                                            $query->whereNotIn('id', array_unique($usedBatchIds));
                                                         }
 
                                                         return $query->pluck('batch_number', 'id');
@@ -267,10 +536,34 @@ class ExamForm
                                                     ->searchable()
                                                     ->preload()
                                                     ->live()
+                                                    ->afterStateUpdated(function ($state, Get $get) {
+                                                        if (! $state) {
+                                                            return;
+                                                        }
+
+                                                        $siblingBatchCourses = $get('../') ?? [];
+                                                        $sameCourseCount = 0;
+
+                                                        foreach ($siblingBatchCourses as $bc) {
+                                                            if (($bc['course_id'] ?? null) == $state) {
+                                                                $sameCourseCount++;
+                                                            }
+                                                        }
+
+                                                        if ($sameCourseCount > 1) {
+                                                            $courseTitle = Course::find($state)?->course_title ?? 'Selected Course';
+                                                            Notification::make()
+                                                                ->warning()
+                                                                ->title('Same Course Assigned!')
+                                                                ->body("Warning: '{$courseTitle}' কোর্সটি একই স্লটে একাধিক ব্যাচে সিলেক্ট করা হয়েছে।")
+                                                                ->persistent()
+                                                                ->send();
+                                                        }
+                                                    })
                                                     ->options(function (Get $get) {
                                                         $batchId = $get('batch_id');
                                                         $sessionId = $get('academic_session_id')
-                                                                  ?? $get('../../../../../academic_session_id') 
+                                                                  ?? $get('../../../../../academic_session_id')
                                                                   ?? $get('../../../../../../academic_session_id');
 
                                                         if (! $batchId) {
@@ -278,7 +571,9 @@ class ExamForm
                                                         }
 
                                                         $batch = Batch::find($batchId);
-                                                        if (! $batch) return [];
+                                                        if (! $batch) {
+                                                            return [];
+                                                        }
 
                                                         $query = SectionCourseAssignmentItem::query()
                                                             ->whereHas('sectionCourseAssignment', function ($q) use ($batchId, $sessionId) {
@@ -290,15 +585,15 @@ class ExamForm
 
                                                         $assignedCourseIds = $query->pluck('course_id')->unique()->filter()->toArray();
 
-                                                        $allSchedules = $get('../../../../../../schedules') 
-                                                                    ?? $get('../../../../../schedules') 
+                                                        $allSchedules = $get('../../../../../../schedules')
+                                                                    ?? $get('../../../../../schedules')
                                                                     ?? [];
 
                                                         $usedCourseIds = [];
                                                         foreach ($allSchedules as $schedule) {
                                                             foreach ($schedule['slot_details'] ?? [] as $slotDetail) {
                                                                 foreach ($slotDetail['batch_courses'] ?? [] as $bc) {
-                                                                    if (($bc['batch_id'] ?? null) == $batchId && !empty($bc['course_id'])) {
+                                                                    if (($bc['batch_id'] ?? null) == $batchId && ! empty($bc['course_id'])) {
                                                                         $usedCourseIds[] = $bc['course_id'];
                                                                     }
                                                                 }
@@ -310,16 +605,47 @@ class ExamForm
 
                                                         $availableCourseIds = array_diff($assignedCourseIds, $usedCourseIds);
 
-                                                        $courses = Course::whereIn('id', $availableCourseIds)
-                                                            ->get()
+                                                        $skipLab = $get('skip_lab_courses')
+                                                                ?? $get('../../../../../skip_lab_courses')
+                                                                ?? $get('../../../../../../skip_lab_courses')
+                                                                ?? true;
+
+                                                        $coursesQuery = Course::whereIn('id', $availableCourseIds);
+
+                                                        $courses = $coursesQuery->get()->filter(function ($course) use ($skipLab) {
+                                                            if (! $skipLab) {
+                                                                return true;
+                                                            }
+
+                                                            if (isset($course->type) && in_array(strtolower($course->type), ['lab', 'practical', 'sessional'])) {
+                                                                return false;
+                                                            }
+                                                            if (isset($course->is_lab) && $course->is_lab) {
+                                                                return false;
+                                                            }
+
+                                                            $code = strtolower($course->course_code ?? $course->code ?? '');
+                                                            $title = strtolower($course->course_title ?? $course->name ?? '');
+
+                                                            $keywords = ['lab', 'laboratory', 'sessional', 'practical', 'project', 'thesis', 'studio'];
+
+                                                            foreach ($keywords as $keyword) {
+                                                                if (str_contains($code, $keyword) || str_contains($title, $keyword)) {
+                                                                    return false;
+                                                                }
+                                                            }
+
+                                                            return true;
+                                                        })
                                                             ->mapWithKeys(function ($course) {
                                                                 $code = $course->course_code ?? $course->code ?? '';
                                                                 $title = $course->course_title ?? $course->name ?? '';
+
                                                                 return [$course->id => trim("{$code} - {$title}", ' -')];
                                                             })
                                                             ->toArray();
 
-                                                        return !empty($courses) ? ["Batch {$batch->batch_number}" => $courses] : [];
+                                                        return ! empty($courses) ? ["Batch {$batch->batch_number}" => $courses] : [];
                                                     })
                                                     ->required()
                                                     ->columnSpan(6),
@@ -329,7 +655,7 @@ class ExamForm
                                                     ->content(function (Get $get) {
                                                         $batchId = $get('batch_id');
                                                         $courseId = $get('course_id');
-                                                        $sessionId = $get('academic_session_id') 
+                                                        $sessionId = $get('academic_session_id')
                                                                   ?? $get('../../../../../academic_session_id')
                                                                   ?? $get('../../../../../../academic_session_id');
 
@@ -363,103 +689,6 @@ class ExamForm
                                                     })
                                                     ->columnSpan(3),
                                             ]),
-                                    ]),
-
-                                // 🟢 ৩. রুম সিলেক্ট ও সিট ক্যাপাসিটি ফিল্ড (Add Batch বাটনের নিচে)
-                                Grid::make(12)
-                                    ->schema([
-                                        Select::make('room_ids')
-                                            ->label('Select Exam Rooms')
-                                            ->multiple()
-                                            ->searchable()
-                                            ->preload()
-                                            ->live()
-                                            ->options(function () {
-                                                // রুম মডেলের নাম ও ক্যাপাসিটি লোড (যদি ফিল্ডের নাম capacity বা total_seats হয়)
-                                                return Room::all()->mapWithKeys(function ($room) {
-                                                    $cap = $room->capacity ?? $room->total_seats ?? $room->seats ?? 0;
-                                                    return [$room->id => "{$room->room_number} (Cap: {$cap})"];
-                                                });
-                                            })
-                                            ->columnSpan(8),
-
-                                        Placeholder::make('room_capacity_status')
-                                            ->label('Available Seats')
-                                            ->content(function (Get $get) {
-                                                $selectedRoomIds = $get('room_ids') ?? [];
-                                                $batchCourses = $get('batch_courses') ?? [];
-                                                $sessionId = $get('academic_session_id') 
-                                                          ?? $get('../../../../../academic_session_id')
-                                                          ?? $get('../../../../../../academic_session_id');
-
-                                                // নির্বাচিত রুমগুলোর মোট সিট গণনা
-                                                $totalAvailableSeats = 0;
-                                                if (!empty($selectedRoomIds)) {
-                                                    $rooms = Room::whereIn('id', $selectedRoomIds)->get();
-                                                    foreach ($rooms as $room) {
-                                                        $totalAvailableSeats += $room->capacity ?? $room->total_seats ?? $room->seats ?? 0;
-                                                    }
-                                                }
-
-                                                // মোট স্টুডেন্ট ও ব্যাচ গণনা
-                                                $totalSlotStudents = 0;
-                                                $uniqueBatches = [];
-
-                                                foreach ($batchCourses as $item) {
-                                                    $bId = $item['batch_id'] ?? null;
-                                                    $cId = $item['course_id'] ?? null;
-
-                                                    if ($bId) {
-                                                        $uniqueBatches[$bId] = true;
-                                                        if ($cId) {
-                                                            $totalSlotStudents += StudentEnrollmentCourse::query()
-                                                                ->where('course_id', $cId)
-                                                                ->whereHas('studentCourseEnrollment', function ($q) use ($bId, $sessionId) {
-                                                                    if ($sessionId) {
-                                                                        $q->where('academic_session_id', $sessionId);
-                                                                    }
-                                                                    $q->whereHas('student', fn ($sq) => $sq->where('batch_id', $bId));
-                                                                })
-                                                                ->count();
-                                                        } else {
-                                                            $batch = Batch::find($bId);
-                                                            if ($batch && method_exists($batch, 'students')) {
-                                                                $totalSlotStudents += $batch->students()->count();
-                                                            }
-                                                        }
-                                                    }
-                                                }
-
-                                                $batchCount = count($uniqueBatches);
-                                                $requiredSeats = ($batchCount === 1) ? ($totalSlotStudents * 2) : $totalSlotStudents;
-
-                                                // খালি রুমের অবস্থা
-                                                if (empty($selectedRoomIds)) {
-                                                    return new HtmlString("<span class='text-sm text-gray-500'>Please select room(s)</span>");
-                                                }
-
-                                                // 🟢 ওয়ার্নিং লজিক
-                                                if ($totalAvailableSeats < $requiredSeats) {
-                                                    $shortage = $requiredSeats - $totalAvailableSeats;
-                                                    $reasonMsg = ($batchCount === 1) 
-                                                        ? " (Single batch requires 2x seats: {$requiredSeats})" 
-                                                        : "";
-
-                                                    return new HtmlString("
-                                                        <div class='text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 p-2 rounded border border-red-200 dark:border-red-900'>
-                                                            ⚠️ Available: {$totalAvailableSeats} Seats <br>
-                                                            Shortage: {$shortage} seats{$reasonMsg}
-                                                        </div>
-                                                    ");
-                                                }
-
-                                                return new HtmlString("
-                                                    <div class='text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 p-2 rounded border border-emerald-200 dark:border-emerald-900'>
-                                                        ✅ Available: {$totalAvailableSeats} Seats
-                                                    </div>
-                                                ");
-                                            })
-                                            ->columnSpan(4),
                                     ]),
                             ]),
                     ]),
