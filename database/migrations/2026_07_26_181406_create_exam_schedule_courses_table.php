@@ -15,6 +15,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('exam_schedule_id')->constrained()->cascadeOnDelete();
             $table->foreignId('section_course_assignment_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('section_course_assignment_item_id')->constrained();
+            $table->foreignId('course_id')->constrained();
+            $table->foreignId('batch_id')->nullable()->constrained()->nullOnDelete(); // 👈 যোগ করা হলো (ব্যাচ ট্র্যাকিং সহজ করতে)
             $table->integer('student_count')->default(0);
             $table->timestamps();
         });

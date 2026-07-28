@@ -18,4 +18,9 @@ class StudentEnrollmentCourse extends Model
     {
         return $this->belongsTo(Course::class);
     }
+
+    public function studentCourseEnrollment(): BelongsTo
+    {
+        return $this->belongsTo(StudentCourseEnrollment::class, 'student_course_enrollment_id');
+    }
 }

@@ -31,4 +31,9 @@ class SeatAllocation extends Model
     {
         return $this->belongsTo(SectionCourseAssignment::class);
     }
+
+    public function course(): BelongsTo
+    {
+        return $this->belongsTo(Course::class);
+    }
 }

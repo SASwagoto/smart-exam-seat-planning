@@ -20,6 +20,9 @@ return new class extends Migration
             $table->integer('total_allocated_seats')->default(0);
             $table->string('status')->default('draft'); // draft, published, completed
             $table->timestamps();
+
+            // একই দিনে এবং একই স্লটে ডুপ্লিকেট এক্সাম শিডিউল এড়াতে
+            $table->unique(['exam_id', 'exam_slot_id', 'date']);
         });
     }
 

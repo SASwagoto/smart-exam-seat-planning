@@ -4,9 +4,9 @@ namespace App\Filament\Resources\Exams\Pages;
 
 use App\Filament\Resources\Exams\ExamResource;
 use Filament\Actions\CreateAction;
-use Filament\Resources\Pages\ManageRecords;
+use Filament\Resources\Pages\ListRecords;
 
-class ManageExams extends ManageRecords
+class ListExams extends ListRecords
 {
     protected static string $resource = ExamResource::class;
 

@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('academic_session_id')->constrained()->cascadeOnDelete();
             $table->foreignId('department_id')->nullable()->constrained()->nullOnDelete();
             $table->date('start_date');
-            $table->date('end_date');
+            $table->date('end_date')->nullable();
             $table->enum('status', ['draft', 'scheduled', 'completed'])->default('draft');
             $table->timestamps();
         });

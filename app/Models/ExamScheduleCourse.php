@@ -21,4 +21,9 @@ class ExamScheduleCourse extends Model
     {
         return $this->belongsTo(SectionCourseAssignment::class);
     }
+
+    public function batch(): BelongsTo
+    {
+        return $this->belongsTo(Batch::class);
+    }
 }

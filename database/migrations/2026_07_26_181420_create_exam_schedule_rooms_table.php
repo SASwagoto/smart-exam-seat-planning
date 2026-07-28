@@ -17,6 +17,9 @@ return new class extends Migration
             $table->foreignId('room_id')->constrained()->cascadeOnDelete();
             $table->integer('effective_capacity')->default(0);
             $table->timestamps();
+
+            // একটি শিডিউলে একই রুম দুবার যোগ করা আটকাবে
+            $table->unique(['exam_schedule_id', 'room_id']);
         });
     }
 
