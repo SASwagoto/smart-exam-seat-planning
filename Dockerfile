@@ -13,10 +13,12 @@ RUN apk add --no-cache \
     zip \
     unzip \
     bash \
-    icu-dev
+    icu-dev \
+    libxml2-dev \
+    oniguruma-dev
 
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip bcmath intl opcache
+    && docker-php-ext-install -j$(nproc) gd pdo_mysql zip bcmath intl opcache mbstring xml dom
 
 # Composer ইনস্টল
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -27,12 +29,12 @@ WORKDIR /var/www/html
 # ব্যাকআপ এবং পারমিশনের জন্য ইউজার তৈরি
 RUN addgroup -g 1000 laravel && adduser -G laravel -g "Laravel User" -s /bin/sh -D -u 1000 laravel
 
-# পুরো প্রজেক্ট কপি করা (লোকাল বিল্ড করা public/build সহ)
+# পুরো প্রজেক্ট কপি করা
 COPY --chown=laravel:laravel . .
 
-# প্রোডাকশন কম্পোজার ইনস্টল (require-dev প্যাকেজ ছাড়া)
+# প্রোডাকশন কম্পোজার ইনস্টল (প্লাটফর্ম মিসম্যাচ এড়াতে --ignore-platform-reqs যোগ করা হয়েছে)
 ENV COMPOSER_ALLOW_SUPERUSER=1
-RUN composer install --no-dev --optimize-autoloader --no-scripts
+RUN composer install --no-dev --optimize-autoloader --no-scripts --ignore-platform-reqs
 
 # Nginx কনফিগারেশন তৈরি
 RUN echo 'server { \
