@@ -1,8 +1,8 @@
-# Stage 1: Node.js frontend build
 FROM node:20-alpine AS node-builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# npm ci এর জায়গায় npm install --no-audit দিন
+RUN npm install --no-audit
 COPY . .
 RUN npm run build
 
