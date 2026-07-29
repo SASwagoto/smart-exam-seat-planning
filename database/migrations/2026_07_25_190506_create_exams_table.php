@@ -18,6 +18,7 @@ return new class extends Migration
             $table->foreignId('department_id')->nullable()->constrained()->nullOnDelete();
             $table->date('start_date');
             $table->date('end_date')->nullable();
+            $table->enum('algorithm_type', ['column_separate', 'zig_zag_mixing'])->default('column_separate');
             $table->enum('status', ['draft', 'scheduled', 'completed'])->default('draft');
             $table->timestamps();
         });

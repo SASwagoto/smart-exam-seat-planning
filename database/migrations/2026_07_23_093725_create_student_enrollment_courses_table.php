@@ -16,7 +16,9 @@ return new class extends Migration
             $table->foreignId('student_course_enrollment_id')
                 ->constrained('student_course_enrollments', 'id', 'stu_crs_enr_fk')
                 ->cascadeOnDelete();
-                
+            $table->foreignId('academic_session_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('batch_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('student_id')->constrained()->cascadeOnDelete();
             $table->foreignId('course_id')->constrained()->cascadeOnDelete();
             $table->string('enrollment_type')->default('Regular');
             $table->string('status')->default('Enrolled');

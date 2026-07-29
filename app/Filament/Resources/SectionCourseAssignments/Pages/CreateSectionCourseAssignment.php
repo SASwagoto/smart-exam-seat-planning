@@ -26,6 +26,7 @@ class CreateSectionCourseAssignment extends CreateRecord
         $assignment = $this->record;
 
         $sectionId = $assignment->section_id;
+        $batchId = $assignment->batch_id;
         $academicSessionId = $assignment->academic_session_id;
 
         // ১. ওই সেকশনের সকল স্টুডেন্টদের আইডি বের করা
@@ -43,7 +44,7 @@ class CreateSectionCourseAssignment extends CreateRecord
         }
 
         // 3. ডুপ্লিকেট এড়াতে Transaction ব্যবহার করে এনরোলমেন্ট সেভ করা
-        DB::transaction(function () use ($studentIds, $courseIds, $academicSessionId) {
+        DB::transaction(function () use ($studentIds, $courseIds, $academicSessionId, $batchId) {
             foreach ($studentIds as $studentId) {
                 // ক) স্টুডেন্টের মূল এনরোলমেন্ট রেকর্ড তৈরি বা বের করা
                 $enrollment = StudentCourseEnrollment::firstOrCreate(
@@ -61,6 +62,9 @@ class CreateSectionCourseAssignment extends CreateRecord
                     StudentEnrollmentCourse::updateOrCreate(
                         [
                             'student_course_enrollment_id' => $enrollment->id,
+                            'academic_session_id' => $academicSessionId,
+                            'batch_id' => $batchId,
+                            'student_id' => $studentId,
                             'course_id' => $courseId,
                         ],
                         [

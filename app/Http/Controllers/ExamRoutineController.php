@@ -3,78 +3,114 @@
 namespace App\Http\Controllers;
 
 use App\Models\Exam;
-use Illuminate\Support\Facades\DB;
 
 class ExamRoutineController extends Controller
 {
-    public function show(Exam $exam)
+    // public function show(Exam $exam)
+    // {
+    //     // ১. সব প্রয়োজনীয় রিলেশন একসাথে লোড করা (Eager Loading)
+    //     $exam->load([
+    //         'department',
+    //         'academicSession',
+    //         'sessions' => function ($query) {
+    //             $query->orderBy('exam_date', 'asc');
+    //         },
+    //         'sessions.examSlot',
+    //         'sessions.courses.course',
+    //         'sessions.courses.batch',
+    //         'sessions.courses.sectionCourseAssignment.section', // সেকশন নাম পাওয়ার জন্য
+    //         'sessions.rooms.room',
+    //     ]);
+
+    //     // ২. সেশনগুলোকে ডেট অনুযায়ী গ্রুপ করা এবং ব্লেডের ফরম্যাটে ডাটা সাজানো
+    //     $routine = $exam->sessions->groupBy(function ($session) {
+    //         return $session->exam_date->format('Y-m-d');
+    //     })->map(function ($daySessions) {
+    //         // প্রতিটি দিনের ভেতরে স্লট অনুযায়ী সাজানো
+    //         return $daySessions->map(function ($session) {
+    //             return (object) [
+    //                 'slot_name' => $session->examSlot->name,
+    //                 'start_time' => $session->examSlot->start_time,
+    //                 'end_time' => $session->examSlot->end_time,
+    //                 'courses' => $session->courses->map(function ($sc) {
+    //                     return (object) [
+    //                         'course_code' => $sc->course->course_code ?? $sc->course->code,
+    //                         'section_name' => $sc->sectionCourseAssignment->section->name ?? 'N/A',
+    //                         'batch_number' => $sc->batch->batch_number ?? $sc->batch->name,
+    //                         'student_count' => $sc->total_students,
+    //                     ];
+    //                 }),
+    //                 'rooms' => $session->rooms->map(function ($sr) {
+    //                     return (object) [
+    //                         'room_number' => $sr->room->room_number,
+    //                     ];
+    //                 }),
+    //             ];
+    //         });
+    //     });
+
+    //     return view('exam-routine.print', compact(
+    //         'exam',
+    //         'routine'
+    //     ));
+
+    // }
+    
+//     public function show(Exam $exam)
+// {
+//     $exam->load([
+//         'department',
+//         'academicSession',
+//         'sessions' => fn($q) => $q->orderBy('exam_date'),
+//         'sessions.examSlot',
+//         'sessions.rooms.room',
+//         'sessions.rooms.seats.sessionCourse.course',
+//         'sessions.rooms.seats.sessionCourse.batch',
+//         'sessions.rooms.seats.sessionCourse.sectionCourseAssignment.section',
+//     ]);
+
+//     // তারিখ অনুযায়ী গ্রুপ করা
+//     $routine = $exam->sessions->groupBy(fn($s) => $s->exam_date->format('Y-m-d'));
+
+//     return view('exam-routine.routine', compact('exam', 'routine'));
+// }
+
+public function show(Exam $exam)
+{
+    $exam->load([
+        'department',
+        'academicSession',
+        'sessions' => fn($q) => $q->orderBy('exam_date'),
+        'sessions.examSlot',
+        'sessions.courses.course',
+        'sessions.courses.batch',
+        'sessions.courses.seats.room.room' 
+    ]);
+
+    
+    $routine = $exam->sessions->groupBy(fn($s) => $s->exam_date->format('Y-m-d'));
+
+    return view('exam-routine.print', compact('exam', 'routine'));
+}
+
+    public function printSeatPlan(Exam $exam)
     {
-        $routine = DB::table('exam_schedules as es')
-            ->join('exam_slots as slot', 'slot.id', '=', 'es.exam_slot_id')
-            ->leftJoin('exam_schedule_courses as esc', 'esc.exam_schedule_id', '=', 'es.id')
-            ->leftJoin('section_course_assignments as sca', 'sca.id', '=', 'esc.section_course_assignment_id')
-            ->leftJoin('section_course_assignment_items as scai', 'scai.section_course_assignment_id', '=', 'sca.id')
-            ->leftJoin('courses as c', 'c.id', '=', 'scai.course_id')
-            ->leftJoin('sections as s', 's.id', '=', 'sca.section_id')
-            ->leftJoin('batches as b', 'b.id', '=', 'esc.batch_id')
-            ->where('es.exam_id', $exam->id)
-            ->select(
-                'es.id as schedule_id',
-                'es.date',
+        $exam->load([
+            'department',
+            'academicSession',
+            'sessions' => function ($query) {
+                $query->orderBy('exam_date', 'asc');
+            },
+            'sessions.examSlot',
+            'sessions.rooms.room',
+            'sessions.rooms.seats.student',
+            'sessions.rooms.seats.sessionCourse.course',
+            'sessions.rooms.seats.sessionCourse.batch',
+        ]);
 
-                'slot.name as slot_name',
-                'slot.start_time',
-                'slot.end_time',
+        // সেশন অনুযায়ী রুমগুলোকে সাজানো
+        $sessions = $exam->sessions;
 
-                'c.course_code as course_code',
-                'c.course_title  as course_name',
-
-                'b.batch_number',
-                's.section_name',
-
-                'esc.student_count'
-            )
-            ->orderBy('es.date')
-            ->orderBy('slot.start_time')
-            ->get();
-
-        $rooms = DB::table('exam_schedule_rooms as esr')
-            ->join('rooms as r', 'r.id', '=', 'esr.room_id')
-
-            ->select(
-                'esr.exam_schedule_id',
-                'r.room_number'
-            )
-            ->get()
-            ->groupBy('exam_schedule_id');
-
-        $routine = $routine
-            ->groupBy('date')
-            ->map(function ($day) use ($rooms) {
-
-                return $day->groupBy('schedule_id')
-                    ->map(function ($schedule) use ($rooms) {
-
-                        $first = $schedule->first();
-
-                        return (object) [
-                            'schedule_id' => $first->schedule_id,
-
-                            'slot_name' => $first->slot_name,
-                            'start_time' => $first->start_time,
-                            'end_time' => $first->end_time,
-
-                            'courses' => $schedule,
-
-                            'rooms' => $rooms[$first->schedule_id] ?? collect(),
-                        ];
-                    });
-            });
-
-        return view('exam-routine.print', compact(
-            'exam',
-            'routine'
-        ));
-
+        return view('exam-routine.seat-plan', compact('exam', 'sessions'));
     }
 }

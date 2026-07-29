@@ -17,6 +17,7 @@ class Exam extends Model
         'department_id',
         'start_date',
         'end_date',
+        'algorithm_type',
         'status',
     ];
 
@@ -35,8 +36,8 @@ class Exam extends Model
         return $this->belongsTo(Department::class);
     }
 
-    public function examSchedules(): HasMany
+    public function sessions(): HasMany
     {
-        return $this->hasMany(ExamSchedule::class);
+        return $this->hasMany(ExamSession::class);
     }
 }

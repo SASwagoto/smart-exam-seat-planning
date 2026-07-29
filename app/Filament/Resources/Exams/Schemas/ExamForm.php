@@ -86,7 +86,7 @@ class ExamForm
                                 'zig_zag_mixing' => 'Zig Zag Mixing (Cross Pattern)',
                                 'column_separate' => 'Column Separate (Alternate Columns)',
                             ])
-                            ->default('zig_zag_mixing')
+                            ->default('column_separate')
                             ->live()
                             ->required(),
 
@@ -466,31 +466,42 @@ class ExamForm
                                                             ->reject(fn ($id) => $id == $currentBatchId)
                                                             ->toArray();
 
-                                                        // 🟢 ৩. রিয়েল টাইম-সিকোয়েন্স অনুযায়ী ব্যাক-টু-ব্যাক স্লট ফিল্টারিং (শুধুমাত্র নির্দিষ্ট তারিখের জন্য)
+                                                        // 🟢 ৩. রিয়েল টাইম-সিকোয়েন্স অনুযায়ী ব্যাক-টু-ব্যাক স্লট ফিল্টারিং (শুধুমাত্র একই তারিখের জন্য)
                                                         $currentSlotId = $get('../../exam_slot_id');
 
-                                                        // বর্তমান তারিখটি তুলে আনা
-                                                        $currentScheduleDate = $get('../../../date') ?? $get('../../../../date');
+                                                        // প্যারেন্ট লেভেল থেকে বর্তমান তারিখটি তুলে আনা
+                                                        $currentScheduleDate = $get('../../date')
+                                                                            ?? $get('../../../date')
+                                                                            ?? $get('../../../../date');
 
-                                                        $schedules = $get('../../../../../../schedules')
-                                                                  ?? $get('../../../../../schedules')
+                                                        // রুট থেকে সব schedules অ্যারে তুলে আনা
+                                                        $schedules = $get('/schedules')
+                                                                  ?? $get('../../schedules')
+                                                                  ?? $get('../../../../../../schedules')
                                                                   ?? [];
 
-                                                        // শুধুমাত্র বর্তমান তারিখের সাথে মিলে যায় এমন schedule খোঁজা
-                                                        $currentDateSchedule = collect($schedules)->firstWhere('date', $currentScheduleDate);
+                                                        // বর্তমান তারিখের Schedule খুঁজে বের করা
+                                                        $currentDateSchedule = collect($schedules)->first(function ($schedule) use ($currentScheduleDate) {
+                                                            if (empty($schedule['date']) || empty($currentScheduleDate)) {
+                                                                return false;
+                                                            }
+
+                                                            return $schedule['date'] === $currentScheduleDate
+                                                                || date('Y-m-d', strtotime($schedule['date'])) === date('Y-m-d', strtotime($currentScheduleDate));
+                                                        });
 
                                                         if ($currentDateSchedule) {
                                                             $slotDetails = $currentDateSchedule['slot_details'] ?? [];
 
                                                             if (! empty($slotDetails)) {
-                                                                // ডেটাবেজ থেকে সমস্ত অ্যাক্টিভ স্লট সময় অনুযায়ী নিয়ে র‍্যাঙ্ক তৈরি
+                                                                // ডেটাবেজ থেকে সমস্ত স্লট সময় অনুযায়ী নিয়ে মাস্টার সিকোয়েন্স তৈরি
                                                                 $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
 
-                                                                // বর্তমান স্লটটির ডেটাবেজ সিকোয়েন্স ইনডেক্স
+                                                                // বর্তমান স্লটের ইনডেক্স
                                                                 $currentMasterIndex = array_search($currentSlotId, $allMasterSlots);
 
                                                                 if ($currentMasterIndex !== false) {
-                                                                    // ক) ঠিক আগের আসল স্লট (Master Index - 1)
+                                                                    // ক) ঠিক আগের স্লট (Master Index - 1)
                                                                     $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
                                                                     if ($prevMasterSlotId) {
                                                                         $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
@@ -503,7 +514,7 @@ class ExamForm
                                                                         }
                                                                     }
 
-                                                                    // খ) ঠিক পরের আসল স্লট (Master Index + 1)
+                                                                    // খ) ঠিক পরের স্লট (Master Index + 1)
                                                                     $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
                                                                     if ($nextMasterSlotId) {
                                                                         $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
@@ -519,7 +530,7 @@ class ExamForm
                                                             }
                                                         }
 
-                                                        // ফিল্টার করে ফাইনাল অপশন ব্যাক করা
+                                                        // ব্যবহৃত ব্যাচগুলো বাদ দেওয়া (Exclude Used Batches)
                                                         if (! empty($usedBatchIds)) {
                                                             $query->whereNotIn('id', array_unique($usedBatchIds));
                                                         }

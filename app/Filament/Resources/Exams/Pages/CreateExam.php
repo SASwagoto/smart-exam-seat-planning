@@ -3,19 +3,27 @@
 namespace App\Filament\Resources\Exams\Pages;
 
 use App\Filament\Resources\Exams\ExamResource;
+use App\Services\Exam\ExamService;
+use App\Services\Exam\SeatPlanService;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class CreateExam extends CreateRecord
 {
     protected static string $resource = ExamResource::class;
+
     protected static bool $persistsDataInSession = true;
 
-    protected function mutateFormDataBeforeCreate(array $data): array
+    protected function getRedirectUrl(): string
     {
-        // 🎯 ফর্মের সম্পূর্ণ ডেটা ব্রাউজারে ফরম্যাট করে থামিয়ে দেখাবে
-        dd($data);
+        return $this->getResource()::getUrl('index');
+    }
 
-        return $data;
+    protected function handleRecordCreation(array $data): Model
+    {
+        $exam = app(ExamService::class)->create($data);
+        // app(SeatPlanService::class)->generate($exam);
+        return $exam;
     }
 
     public function getMaxContentWidth(): string
