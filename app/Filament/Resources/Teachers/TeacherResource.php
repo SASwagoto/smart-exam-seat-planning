@@ -116,10 +116,10 @@ class TeacherResource extends Resource
                     ->searchable(),
 
                 // 🔥 অ্যাসাইন করা কোর্সগুলো টেবিলে ব্যাজ আকারে দেখানোর ব্যবস্থা
-                TextColumn::make('courses.course_code')
-                    ->label('Assigned Courses')
-                    ->badge()
-                    ->separator(','),
+                // TextColumn::make('courses.course_code')
+                //     ->label('Assigned Courses')
+                //     ->badge()
+                //     ->separator(','),
 
                 TextColumn::make('status')
                     ->badge()

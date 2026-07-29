@@ -312,7 +312,7 @@ class ExamForm
                                             ->orderBy('start_time', 'asc')
                                             ->pluck('name', 'id');
                                     })
-                                    ->columns(4)
+                                    ->columns(5)
                                     ->gridDirection('row')
                                     ->live()
                                     ->afterStateUpdated(function ($state, Set $set, Get $get) {

@@ -92,7 +92,7 @@
 
     <section class="px-6 mb-32" data-aos="fade-up" data-aos-duration="1000">
         <div class="max-w-6xl mx-auto glass-card p-6 rounded-[2rem] shadow-2xl flex items-center justify-center">
-            <img src="{{ asset('path/to/your/logo.png') }}" alt="Logo Large" class="h-28 opacity-90 transition duration-500 hover:opacity-100"> </div>
+            <img src="{{ asset('frontend/images/logo.png') }}" alt="Logo Large" class="h-28 opacity-90 transition duration-500 hover:opacity-100"> </div>
     </section>
 
     <section id="features" class="py-24 px-6 relative">
