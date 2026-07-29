@@ -185,14 +185,14 @@ class ExamForm
                                 ->get()
                                 ->sum(fn ($room) => $room->effective_capacity);
 
-                            // ডেটাবেজের সমস্ত আসল স্লট ক্রমানুসারে নিয়ে রাখা
+                            // ডেটাবেজের সমস্ত আসল স্লট ক্রমানুসারে নিয়ে রাখা
                             $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
 
                             foreach ($schedules as $sIndex => $schedule) {
                                 $dateStr = ! empty($schedule['date']) ? Carbon::parse($schedule['date'])->format('d M, Y') : 'Row #'.($sIndex + 1);
 
                                 if (empty($schedule['exam_slots'])) {
-                                    $fail("{$dateStr} তারিখের জন্য কোনো Exam Slot নির্বাচন করা হয়নি।");
+                                    $fail("{$dateStr} তারিখের জন্য কোনো Exam Slot নির্বাচন করা হয়নি।");
 
                                     return;
                                 }
@@ -221,7 +221,7 @@ class ExamForm
 
                                         if ($bId && ! $cId) {
                                             $batchNum = Batch::find($bId)?->batch_number ?? 'Batch';
-                                            $fail("{$dateStr} -> {$slotName}: {$batchNum} ব্যাচের জন্য Course নির্বাচন করা হয়নি।");
+                                            $fail("{$dateStr} -> {$slotName}: {$batchNum} ব্যাচের জন্য Course নির্বাচন করা হয়নি।");
 
                                             return;
                                         }
@@ -246,16 +246,16 @@ class ExamForm
                                     $maxAllowed = ($batchCount <= 1) ? floor($totalEffectiveSeats / 2) : $totalEffectiveSeats;
 
                                     if ($totalSlotStudents > $maxAllowed) {
-                                        $fail("{$dateStr} -> {$slotName}: মোট শিক্ষার্থী ({$totalSlotStudents}) আপনার সর্বোচ্চ রুম ধারণক্ষমতা ({$maxAllowed}) ছাড়িয়ে গেছে!");
+                                        $fail("{$dateStr} -> {$slotName}: মোট শিক্ষার্থী ({$totalSlotStudents}) আপনার সর্বোচ্চ রুম ধারণক্ষমতা ({$maxAllowed}) ছাড়িয়ে গেছে!");
 
                                         return;
                                     }
 
-                                    // 🟢 ৫. টাইম-সিকোয়েন্স ব্যাক-টু-ব্যাক ভ্যালিডেশন
+                                    // 🟢 ৫. টাইম-সিকোয়েন্স ব্যাক-টু-ব্যাক ভ্যালিডেশন (শুধুমাত্র একই তারিখের $slotDetails থেকে চেক)
                                     $currentMasterIndex = array_search($slotId, $allMasterSlots);
 
                                     if ($currentMasterIndex !== false) {
-                                        // ঠিক আগের আসল স্লট
+                                        // ঠিক আগের আসল স্লট (একই তারিখের মধ্যে)
                                         $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
                                         if ($prevMasterSlotId) {
                                             $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
@@ -265,14 +265,14 @@ class ExamForm
 
                                                 if (! empty($commonBatches)) {
                                                     $matchedNames = Batch::whereIn('id', $commonBatches)->pluck('batch_number')->implode(', ');
-                                                    $fail("{$dateStr}: Batch {$matchedNames} ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
+                                                    $fail("{$dateStr}: Batch {$matchedNames} একই দিনে ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
 
                                                     return;
                                                 }
                                             }
                                         }
 
-                                        // ঠিক পরের আসল স্লট
+                                        // ঠিক পরের আসল স্লট (একই তারিখের মধ্যে)
                                         $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
                                         if ($nextMasterSlotId) {
                                             $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
@@ -282,7 +282,7 @@ class ExamForm
 
                                                 if (! empty($commonBatches)) {
                                                     $matchedNames = Batch::whereIn('id', $commonBatches)->pluck('batch_number')->implode(', ');
-                                                    $fail("{$dateStr}: Batch {$matchedNames} ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
+                                                    $fail("{$dateStr}: Batch {$matchedNames} একই দিনে ব্যাক-টু-ব্যাক স্লটে পরীক্ষায় অংশ নিতে পারবে না।");
 
                                                     return;
                                                 }
@@ -426,7 +426,7 @@ class ExamForm
                                                     ->hiddenLabel()
                                                     ->placeholder('Select Batch')
                                                     ->options(function (Get $get) {
-                                                        // ১. ডিপার্টমেন্ট ও সেশন অনুযায়ী অ্যাসাইন করা ব্যাচসমূহ ফিল্টার
+                                                        // ১. ডিপার্টমেন্ট ও সেশন অনুযায়ী অ্যাসাইন করা ব্যাচসমূহ ফিল্টার
                                                         $deptId = $get('department_id')
                                                                 ?? $get('../../../../../department_id')
                                                                 ?? $get('../../../../../../department_id');
@@ -466,54 +466,56 @@ class ExamForm
                                                             ->reject(fn ($id) => $id == $currentBatchId)
                                                             ->toArray();
 
-                                                        // 🟢 ৩. রিয়েল টাইম-সিকোয়েন্স অনুযায়ী ব্যাক-টু-ব্যাক স্লট ফিল্টারিং
+                                                        // 🟢 ৩. রিয়েল টাইম-সিকোয়েন্স অনুযায়ী ব্যাক-টু-ব্যাক স্লট ফিল্টারিং (শুধুমাত্র নির্দিষ্ট তারিখের জন্য)
                                                         $currentSlotId = $get('../../exam_slot_id');
+
+                                                        // বর্তমান তারিখটি তুলে আনা
+                                                        $currentScheduleDate = $get('../../../date') ?? $get('../../../../date');
+
                                                         $schedules = $get('../../../../../../schedules')
                                                                   ?? $get('../../../../../schedules')
                                                                   ?? [];
 
-                                                        foreach ($schedules as $schedule) {
-                                                            $slotDetails = $schedule['slot_details'] ?? [];
+                                                        // শুধুমাত্র বর্তমান তারিখের সাথে মিলে যায় এমন schedule খোঁজা
+                                                        $currentDateSchedule = collect($schedules)->firstWhere('date', $currentScheduleDate);
 
-                                                            if (empty($slotDetails)) {
-                                                                continue;
-                                                            }
+                                                        if ($currentDateSchedule) {
+                                                            $slotDetails = $currentDateSchedule['slot_details'] ?? [];
 
-                                                            // ডেটাবেজ থেকে সমস্ত অ্যাক্টিভ স্লট সময় অনুযায়ী নিয়ে তাদের আসল র‍্যাঙ্ক/ইন্ডেক্স তৈরি
-                                                            $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
+                                                            if (! empty($slotDetails)) {
+                                                                // ডেটাবেজ থেকে সমস্ত অ্যাক্টিভ স্লট সময় অনুযায়ী নিয়ে র‍্যাঙ্ক তৈরি
+                                                                $allMasterSlots = ExamSlot::orderBy('start_time', 'asc')->pluck('id')->toArray();
 
-                                                            // বর্তমান স্লটটির ডেটাবেজ সিকোয়েন্স ইনডেক্স কত?
-                                                            $currentMasterIndex = array_search($currentSlotId, $allMasterSlots);
+                                                                // বর্তমান স্লটটির ডেটাবেজ সিকোয়েন্স ইনডেক্স
+                                                                $currentMasterIndex = array_search($currentSlotId, $allMasterSlots);
 
-                                                            if ($currentMasterIndex !== false) {
-                                                                // ক) ঠিক আগের আসল স্লট (Master Index - 1)
-                                                                $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
-                                                                if ($prevMasterSlotId) {
-                                                                    // চেক করা এই আগের স্লটটি কি ইউজার বর্তমানে ফর্মে সিলেক্ট করেছে?
-                                                                    $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
-                                                                    if ($prevSlotDetail) {
-                                                                        foreach ($prevSlotDetail['batch_courses'] ?? [] as $bc) {
-                                                                            if (! empty($bc['batch_id'])) {
-                                                                                $usedBatchIds[] = $bc['batch_id'];
+                                                                if ($currentMasterIndex !== false) {
+                                                                    // ক) ঠিক আগের আসল স্লট (Master Index - 1)
+                                                                    $prevMasterSlotId = $allMasterSlots[$currentMasterIndex - 1] ?? null;
+                                                                    if ($prevMasterSlotId) {
+                                                                        $prevSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $prevMasterSlotId);
+                                                                        if ($prevSlotDetail) {
+                                                                            foreach ($prevSlotDetail['batch_courses'] ?? [] as $bc) {
+                                                                                if (! empty($bc['batch_id'])) {
+                                                                                    $usedBatchIds[] = $bc['batch_id'];
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    // খ) ঠিক পরের আসল স্লট (Master Index + 1)
+                                                                    $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
+                                                                    if ($nextMasterSlotId) {
+                                                                        $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
+                                                                        if ($nextSlotDetail) {
+                                                                            foreach ($nextSlotDetail['batch_courses'] ?? [] as $bc) {
+                                                                                if (! empty($bc['batch_id'])) {
+                                                                                    $usedBatchIds[] = $bc['batch_id'];
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
                                                                 }
-
-                                                                // খ) ঠিক পরের আসল স্লট (Master Index + 1)
-                                                                $nextMasterSlotId = $allMasterSlots[$currentMasterIndex + 1] ?? null;
-                                                                if ($nextMasterSlotId) {
-                                                                    // চেক করা এই পরের স্লটটি কি ইউজার বর্তমানে ফর্মে সিলেক্ট করেছে?
-                                                                    $nextSlotDetail = collect($slotDetails)->firstWhere('exam_slot_id', $nextMasterSlotId);
-                                                                    if ($nextSlotDetail) {
-                                                                        foreach ($nextSlotDetail['batch_courses'] ?? [] as $bc) {
-                                                                            if (! empty($bc['batch_id'])) {
-                                                                                $usedBatchIds[] = $bc['batch_id'];
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                break;
                                                             }
                                                         }
 
