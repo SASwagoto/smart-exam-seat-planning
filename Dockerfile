@@ -1,11 +1,3 @@
-FROM node:20-alpine AS node-builder
-WORKDIR /app
-COPY package*.json ./
-# npm ci এর জায়গায় npm install --no-audit দিন
-RUN npm install --no-audit
-COPY . .
-RUN npm run build
-
 # Stage 2: PHP and Web server
 FROM php:8.2-fpm-alpine
 
